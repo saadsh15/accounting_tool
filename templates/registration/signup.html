@@ -1,0 +1,64 @@
+{% extends "base.html" %}
+
+{% block title %}Sign Up{% endblock %}
+
+{% block content %}
+<style>
+    /* Basic styling for django form fields */
+    .django-form input {
+        width: 100%;
+        padding: 0.5rem 0.75rem;
+        margin-top: 0.25rem;
+        border: 1px solid #d1d5db;
+        border-radius: 0.375rem;
+    }
+    .django-form label {
+        font-size: 0.875rem;
+        font-weight: 500;
+        color: #374151;
+    }
+    .django-form ul.errorlist {
+        color: #ef4444;
+        font-size: 0.875rem;
+        margin-top: 0.25rem;
+        margin-bottom: 0.5rem;
+    }
+    .django-form .helptext {
+        font-size: 0.75rem;
+        color: #6b7280;
+        display: block;
+        margin-top: 0.25rem;
+    }
+    .django-form p {
+        margin-bottom: 1rem;
+    }
+</style>
+<div class="min-h-screen flex items-center justify-center py-12 px-4 sm:px-6 lg:px-8">
+    <div class="max-w-md w-full space-y-8 bg-white p-10 rounded-xl shadow-lg">
+        <div>
+            <h2 class="mt-6 text-center text-3xl font-extrabold text-gray-900">
+                Create your account
+            </h2>
+        </div>
+        <form class="mt-8 space-y-6 django-form" action="{% url 'signup' %}" method="POST">
+            {% csrf_token %}
+            
+            <div>
+                {{ form.as_p }}
+            </div>
+
+            <div>
+                <button type="submit" class="group relative w-full flex justify-center py-2 px-4 border border-transparent text-sm font-medium rounded-md text-white bg-indigo-600 hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500">
+                    Sign up
+                </button>
+            </div>
+            
+            <div class="text-sm text-center mt-4">
+                <a href="{% url 'login' %}" class="font-medium text-indigo-600 hover:text-indigo-500">
+                    Already have an account? Sign in
+                </a>
+            </div>
+        </form>
+    </div>
+</div>
+{% endblock %}
