@@ -4,14 +4,46 @@ from django.contrib.auth import login
 from accounting.models import Transaction
 from .forms import CustomUserCreationForm
 from accounting.ai_service import generate_financial_insights
+from django.db.models import Sum
+from decimal import Decimal
 
 @login_required
 def dashboard(request):
     transactions = []
+    total_income = Decimal('0.00')
+    total_expenses = Decimal('0.00')
+    net_balance = Decimal('0.00')
+    category_data = {}
+    
     if request.user.organization:
-        transactions = Transaction.objects.filter(account__organization=request.user.organization).order_by('-date')[:10]
+        org_txs = Transaction.objects.filter(account__organization=request.user.organization)
+        transactions = org_txs.order_by('-date')[:10]
         
-    return render(request, 'core/dashboard.html', {'transactions': transactions})
+        for tx in org_txs:
+            if tx.amount > 0:
+                total_income += tx.amount
+            else:
+                total_expenses += abs(tx.amount)
+                
+                # Aggregate expenses by category for the chart
+                cat = tx.category if tx.category else 'Uncategorized'
+                category_data[cat] = category_data.get(cat, Decimal('0.00')) + abs(tx.amount)
+                
+        net_balance = total_income - total_expenses
+        
+    # Prepare data for Chart.js
+    chart_labels = list(category_data.keys())
+    chart_values = [float(v) for v in category_data.values()]
+        
+    context = {
+        'transactions': transactions,
+        'total_income': total_income,
+        'total_expenses': total_expenses,
+        'net_balance': net_balance,
+        'chart_labels': chart_labels,
+        'chart_values': chart_values,
+    }
+    return render(request, 'core/dashboard.html', context)
 
 @login_required
 def ai_insights(request):

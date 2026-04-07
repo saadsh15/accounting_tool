@@ -21,27 +21,29 @@
         <div class="bg-white overflow-hidden shadow rounded-lg">
             <div class="px-4 py-5 sm:p-6">
                 <dt class="text-sm font-medium text-gray-500 truncate">Total Income</dt>
-                <dd class="mt-1 text-3xl font-semibold text-green-600">$<span id="totalIncome">0.00</span></dd>
+                <dd class="mt-1 text-3xl font-semibold text-green-600">$<span id="totalIncome">{{ total_income }}</span></dd>
             </div>
         </div>
         <div class="bg-white overflow-hidden shadow rounded-lg">
             <div class="px-4 py-5 sm:p-6">
                 <dt class="text-sm font-medium text-gray-500 truncate">Total Expenses</dt>
-                <dd class="mt-1 text-3xl font-semibold text-red-600">$<span id="totalExpenses">0.00</span></dd>
+                <dd class="mt-1 text-3xl font-semibold text-red-600">$<span id="totalExpenses">{{ total_expenses }}</span></dd>
             </div>
         </div>
         <div class="bg-white overflow-hidden shadow rounded-lg">
             <div class="px-4 py-5 sm:p-6">
                 <dt class="text-sm font-medium text-gray-500 truncate">Net Balance</dt>
-                <dd class="mt-1 text-3xl font-semibold text-indigo-600">$<span id="netBalance">0.00</span></dd>
+                <dd class="mt-1 text-3xl font-semibold {% if net_balance < 0 %}text-red-600{% else %}text-indigo-600{% endif %}">$<span id="netBalance">{{ net_balance }}</span></dd>
             </div>
         </div>
     </div>
 
     <div class="grid grid-cols-1 lg:grid-cols-2 gap-8">
-        <div class="bg-white p-6 shadow rounded-lg">
+        <div class="bg-white p-6 shadow rounded-lg flex flex-col">
             <h3 class="text-lg leading-6 font-medium text-gray-900 mb-4">Expenses by Category</h3>
-            <canvas id="categoryChart"></canvas>
+            <div class="relative flex-1" style="min-height: 300px;">
+                <canvas id="categoryChart"></canvas>
+            </div>
         </div>
         <div class="bg-white p-6 shadow rounded-lg">
             <h3 class="text-lg leading-6 font-medium text-gray-900 mb-4">Recent Transactions</h3>
@@ -78,4 +80,44 @@
         </div>
     </div>
 </div>
+
+{{ chart_labels|json_script:"chartLabels" }}
+{{ chart_values|json_script:"chartValues" }}
+
+<script>
+    document.addEventListener('DOMContentLoaded', function() {
+        const labels = JSON.parse(document.getElementById('chartLabels').textContent);
+        const data = JSON.parse(document.getElementById('chartValues').textContent);
+        
+        if(labels.length > 0) {
+            const ctx = document.getElementById('categoryChart').getContext('2d');
+            new Chart(ctx, {
+                type: 'doughnut',
+                data: {
+                    labels: labels,
+                    datasets: [{
+                        label: 'Expenses by Category',
+                        data: data,
+                        backgroundColor: [
+                            'rgba(255, 99, 132, 0.8)',
+                            'rgba(54, 162, 235, 0.8)',
+                            'rgba(255, 206, 86, 0.8)',
+                            'rgba(75, 192, 192, 0.8)',
+                            'rgba(153, 102, 255, 0.8)',
+                            'rgba(255, 159, 64, 0.8)',
+                            'rgba(199, 199, 199, 0.8)',
+                            'rgba(83, 102, 255, 0.8)',
+                            'rgba(255, 99, 255, 0.8)',
+                        ],
+                        borderWidth: 1
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                }
+            });
+        }
+    });
+</script>
 {% endblock %}
