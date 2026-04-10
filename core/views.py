@@ -1,6 +1,8 @@
 from django.shortcuts import render, redirect
 from django.contrib.auth.decorators import login_required
 from django.contrib.auth import login
+from django.http import HttpResponse
+import csv
 from accounting.models import Transaction
 from .forms import CustomUserCreationForm
 from accounting.ai_service import generate_financial_insights
@@ -79,3 +81,18 @@ def signup(request):
     else:
         form = CustomUserCreationForm()
     return render(request, 'registration/signup.html', {'form': form})
+
+@login_required
+def download_csv(request):
+    response = HttpResponse(content_type='text/csv')
+    response['Content-Disposition'] = 'attachment; filename="accounting_data.csv"'
+
+    writer = csv.writer(response)
+    writer.writerow(['Date', 'Description', 'Amount', 'Category', 'Account'])
+
+    if request.user.organization:
+        transactions = Transaction.objects.filter(account__organization=request.user.organization).order_by('-date')
+        for tx in transactions:
+            writer.writerow([tx.date, tx.description, tx.amount, tx.category, tx.account.name])
+
+    return response
