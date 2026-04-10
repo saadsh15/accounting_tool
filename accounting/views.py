@@ -42,3 +42,30 @@ def upload_statement(request):
         accounts = Account.objects.filter(organization=request.user.organization)
         
     return render(request, 'accounting/upload.html', {'accounts': accounts})
+
+@login_required
+def add_account(request):
+    if not request.user.organization:
+        org = Organization.objects.create(name=f"{request.user.username}'s Organization")
+        request.user.organization = org
+        request.user.save()
+
+    if request.method == 'POST':
+        name = request.POST.get('name')
+        bank_name = request.POST.get('bank_name', '')
+        account_number = request.POST.get('account_number', '')
+        
+        if name:
+            Account.objects.create(
+                organization=request.user.organization,
+                name=name,
+                bank_name=bank_name,
+                account_number=account_number
+            )
+            messages.success(request, f'Account "{name}" added successfully.')
+            return redirect('upload_statement')
+        else:
+            messages.error(request, 'Account name is required.')
+            
+    return render(request, 'accounting/add_account.html')
+

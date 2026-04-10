@@ -17,7 +17,12 @@
                     {% csrf_token %}
                     <div class="grid grid-cols-6 gap-6">
                         <div class="col-span-6 sm:col-span-4">
-                            <label for="account" class="block text-sm font-medium text-gray-700">Bank Account</label>
+                            <div class="flex justify-between items-center">
+                                <label for="account" class="block text-sm font-medium text-gray-700">Bank Account</label>
+                                <a href="{% url 'add_account' %}" class="text-sm font-medium text-indigo-600 hover:text-indigo-500">
+                                    + Add New Account
+                                </a>
+                            </div>
                             <select id="account" name="account" class="mt-1 block w-full py-2 px-3 border border-gray-300 bg-white rounded-md shadow-sm focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm">
                                 {% for account in accounts %}
                                     <option value="{{ account.id }}">{{ account.name }}</option>
