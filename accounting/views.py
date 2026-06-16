@@ -1,4 +1,5 @@
-from django.shortcuts import render, redirect
+from django.shortcuts import render, redirect, get_object_or_404
+import os
 from django.contrib.auth.decorators import login_required
 from .models import Account, Statement, Transaction
 from core.models import Organization
@@ -18,7 +19,20 @@ def upload_statement(request):
         file = request.FILES.get('statement_file')
         
         if file and account_id:
-            account = Account.objects.get(id=account_id)
+            # 1. File Size Validation (5MB Limit)
+            if file.size > 5 * 1024 * 1024:
+                messages.error(request, 'File size exceeds the 5MB limit.')
+                return redirect('upload_statement')
+
+            # 2. File Extension Validation
+            ext = os.path.splitext(file.name)[1].lower()
+            if ext not in ['.pdf', '.png', '.jpg', '.jpeg']:
+                messages.error(request, 'Unsupported file type. Please upload a PDF or image.')
+                return redirect('upload_statement')
+
+            # 3. IDOR Fix: Ensure account belongs to user's organization
+            account = get_object_or_404(Account, id=account_id, organization=request.user.organization)
+            
             statement = Statement.objects.create(account=account, file=file)
             
             # Simple synchronous processing for MVP

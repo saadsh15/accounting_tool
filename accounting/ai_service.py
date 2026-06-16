@@ -1,5 +1,6 @@
 import requests
 import json
+import re
 from django.conf import settings
 
 OLLAMA_URL = getattr(settings, 'OLLAMA_URL', 'http://127.0.0.1:11434/api/generate')
@@ -9,6 +10,9 @@ def categorize_transaction_with_ai(description, amount):
     """
     Asks the local Ollama model to categorize a single transaction description.
     """
+    # Sanitize the description to prevent prompt injection
+    safe_description = re.sub(r'[^\w\s-]', '', description)[:200]
+    
     categories = [
         "Income", "Rent/Mortgage", "Utilities", "Groceries", 
         "Dining Out", "Transportation", "Insurance", "Entertainment", 
@@ -22,7 +26,7 @@ Do not provide any explanation, preamble, or formatting. Output only the categor
 
 Categories: {', '.join(categories)}
 
-Transaction Description: "{description}"
+Transaction Description: "{safe_description}"
 Amount: {amount}
 """
 
