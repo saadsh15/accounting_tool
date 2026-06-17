@@ -22,7 +22,15 @@ def dashboard(request):
     total_income = Decimal('0.00')
     total_expenses = Decimal('0.00')
     net_balance = Decimal('0.00')
-    category_data = {}
+    
+    EXPENSE_CATEGORIES = [
+        "Rent/Mortgage", "Utilities", "Groceries", 
+        "Dining Out", "Transportation", "Insurance", "Entertainment", 
+        "Healthcare", "Personal Care", "Debt Payments", "Savings/Investments", 
+        "Education", "Miscellaneous", "Bank Fees"
+    ]
+    
+    category_data = {cat: Decimal('0.00') for cat in EXPENSE_CATEGORIES}
     
     if request.user.organization:
         org_txs = Transaction.objects.filter(account__organization=request.user.organization)
@@ -35,14 +43,28 @@ def dashboard(request):
                 total_expenses += abs(tx.amount)
                 
                 # Aggregate expenses by category for the chart
-                cat = tx.category if tx.category else 'Uncategorized'
-                category_data[cat] = category_data.get(cat, Decimal('0.00')) + abs(tx.amount)
+                cat = tx.category if tx.category else 'Miscellaneous'
+                matched_cat = None
+                for std_cat in EXPENSE_CATEGORIES:
+                    if std_cat.lower() == cat.lower():
+                        matched_cat = std_cat
+                        break
+                
+                if matched_cat:
+                    category_data[matched_cat] += abs(tx.amount)
+                else:
+                    category_data["Miscellaneous"] += abs(tx.amount)
                 
         net_balance = total_income - total_expenses
         
-    # Prepare data for Chart.js
-    chart_labels = list(category_data.keys())
-    chart_values = [float(v) for v in category_data.values()]
+    # Prepare data for Chart.js (only non-zero categories for a clean chart)
+    chart_labels = []
+    chart_values = []
+    for cat in EXPENSE_CATEGORIES:
+        val = category_data[cat]
+        if val > 0:
+            chart_labels.append(cat)
+            chart_values.append(float(val))
         
     context = {
         'transactions': transactions,
