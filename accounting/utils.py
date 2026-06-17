@@ -2,10 +2,131 @@ import pdfplumber
 import pytesseract
 from PIL import Image
 import re
+import requests
+import json
 from datetime import datetime
+from django.conf import settings
 from .models import Transaction, CategoryRule
 from decimal import Decimal, InvalidOperation
 from .ai_service import categorize_transaction_with_ai
+
+def ocr_via_ocr_space(file_path):
+    """
+    Calls OCR.space API as a fallback when Tesseract is not available.
+    Supports PDF and image files.
+    """
+    try:
+        api_key = getattr(settings, 'OCR_SPACE_API_KEY', 'helloworld')
+        if not api_key:
+            api_key = 'helloworld'
+            
+        payload = {
+            'apikey': api_key,
+            'language': 'eng',
+            'isTable': True, # Forces row-by-row parsing for tabular data
+            'OCREngine': 2,   # Engine 2 is much better for table layouts
+        }
+        
+        with open(file_path, 'rb') as f:
+            r = requests.post(
+                'https://api.ocr.space/parse/image',
+                files={'file': f},
+                data=payload,
+                timeout=30
+            )
+        
+        res = r.json()
+        if res.get('IsErroredOnProcessing') is False:
+            parsed_results = res.get('ParsedResults', [])
+            extracted_text = ""
+            for result in parsed_results:
+                text = result.get('ParsedText', '')
+                if text:
+                    extracted_text += text + "\n"
+            return extracted_text
+        else:
+            error_message = res.get('ErrorMessage')
+            print(f"OCR.space API Error: {error_message}")
+            return ""
+    except Exception as e:
+        print(f"Failed to call OCR.space API: {e}")
+        return ""
+
+def extract_transactions_with_ai(text):
+    """
+    Asks the configured AI model to extract transactions from raw text.
+    Returns a list of dicts: [{'date_str': 'YYYY-MM-DD', 'description': '...', 'amount': Decimal, 'category': '...'}]
+    """
+    from .ai_service import ACCOUNTING_CATEGORIES, AI_PROVIDER, _call_deepseek, _call_ollama
+    
+    categories_str = ", ".join(ACCOUNTING_CATEGORIES)
+    prompt = f"""
+You are an expert financial data extraction system. Analyze the following raw bank statement text and extract all transactions.
+For each transaction, extract:
+- date: formatted as YYYY-MM-DD. If the statement only provides MM/DD, assume the year is the current year (2026).
+- description: clean, readable description of the transaction.
+- amount: the decimal amount. Deposits/credits must be positive. Withdrawals/debits/charges must be negative.
+- category: categorize the transaction into EXACTLY ONE of these categories: {categories_str}. If none fit, use "Miscellaneous".
+
+Format the output as a valid JSON array of objects, with no other text, explanation, or markdown formatting. Example:
+[
+  {{"date": "2026-10-02", "description": "POS PURCHASE WAL-MART", "amount": -4.23, "category": "Groceries"}},
+  {{"date": "2026-10-03", "description": "PREAUTHORIZED CREDIT PAYROLL", "amount": 763.01, "category": "Income"}}
+]
+
+Here is the raw bank statement text:
+{text}
+"""
+    try:
+        if AI_PROVIDER == 'deepseek':
+            response_text = _call_deepseek(prompt, temperature=0.0)
+        else:
+            response_text = _call_ollama(prompt, temperature=0.0)
+            
+        # Parse JSON
+        cleaned = response_text.strip()
+        if cleaned.startswith("```"):
+            first_newline = cleaned.find("\n")
+            if first_newline != -1:
+                cleaned = cleaned[first_newline:].strip()
+            if cleaned.endswith("```"):
+                cleaned = cleaned[:-3].strip()
+                
+        transactions = json.loads(cleaned)
+        
+        validated_txs = []
+        for tx in transactions:
+            if 'date' in tx and 'description' in tx and 'amount' in tx:
+                try:
+                    datetime.strptime(tx['date'], '%Y-%m-%d')
+                except ValueError:
+                    try:
+                        parsed_date = datetime.strptime(tx['date'], '%m/%d/%Y')
+                        tx['date'] = parsed_date.strftime('%Y-%m-%d')
+                    except ValueError:
+                        tx['date'] = datetime.today().strftime('%Y-%m-%d')
+                
+                category = tx.get('category', 'Uncategorized')
+                if category not in ACCOUNTING_CATEGORIES:
+                    matched = False
+                    for valid_cat in ACCOUNTING_CATEGORIES:
+                        if valid_cat.lower() in category.lower():
+                            category = valid_cat
+                            matched = True
+                            break
+                    if not matched:
+                        category = "Uncategorized"
+                
+                validated_txs.append({
+                    'date_str': tx['date'],
+                    'description': tx['description'],
+                    'amount': Decimal(str(tx['amount'])),
+                    'category': category
+                })
+        return validated_txs
+    except Exception as e:
+        print(f"Failed to extract transactions with AI: {e}")
+        return []
 
 def process_statement(statement):
     file_path = statement.file.path
@@ -28,11 +149,19 @@ def process_statement(statement):
                     except Exception as e:
                         print(f"Skipped OCR on PDF page due to missing Tesseract: {e}")
                         
+        # Fallback to OCR.space if no text was extracted
+        if not text.strip():
+            print("No text extracted via pdfplumber or local Tesseract. Falling back to OCR.space API...")
+            text = ocr_via_ocr_space(file_path)
+                        
     elif file_path.lower().endswith(('.png', '.jpg', '.jpeg')):
         try:
             text = pytesseract.image_to_string(Image.open(file_path))
         except Exception as e:
-            raise Exception("Image uploads require Tesseract OCR, which is not installed in the Vercel serverless environment. Please upload a standard text-based PDF instead.")
+            print(f"Local OCR failed or missing: {e}. Falling back to OCR.space API...")
+            text = ocr_via_ocr_space(file_path)
+            if not text:
+                raise Exception("Image uploads require Tesseract OCR, which is not installed in the Vercel serverless environment. Please upload a standard text-based PDF instead.")
 
     lines = text.split('\n')
     
@@ -121,6 +250,40 @@ def process_statement(statement):
             transactions_created += 1
         except (ValueError, InvalidOperation):
             continue
+            
+    # AI Fallback Extraction if regex failed to extract anything
+    if transactions_created == 0 and text.strip():
+        print("Regex extraction returned 0 transactions. Falling back to AI extraction...")
+        ai_txs = extract_transactions_with_ai(text)
+        for tx in ai_txs:
+            try:
+                date_obj = datetime.strptime(tx['date_str'], '%Y-%m-%d').date()
+                amount = tx['amount']
+                description = tx['description']
+                category = tx['category']
+                
+                # Rule-based categorization has higher priority than AI prediction
+                for rule in rules:
+                    if rule.keyword.lower() in description.lower():
+                        category = rule.category_name
+                        break
+                        
+                # If category is still Uncategorized/Miscellaneous, we keep AI category
+                if category == "Uncategorized" or category == "Miscellaneous":
+                    if tx['category'] != "Uncategorized" and tx['category'] != "Miscellaneous":
+                        category = tx['category']
+                
+                Transaction.objects.create(
+                    statement=statement,
+                    account=statement.account,
+                    date=date_obj,
+                    description=description.strip(),
+                    amount=amount,
+                    category=category
+                )
+                transactions_created += 1
+            except Exception as e:
+                print(f"Failed to save AI-extracted transaction: {e}")
                 
     statement.processed = True
     statement.save()

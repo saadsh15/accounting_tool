@@ -25,6 +25,7 @@ DEEPSEEK_API_KEY = env('DEEPSEEK_API_KEY', default='')
 DEEPSEEK_API_URL = env('DEEPSEEK_API_URL', default='https://api.deepseek.com/v1/chat/completions')
 OLLAMA_URL = env('OLLAMA_URL', default='http://127.0.0.1:11434/api/generate')
 OLLAMA_MODEL = env('OLLAMA_MODEL', default='phi3')
+OCR_SPACE_API_KEY = env('OCR_SPACE_API_KEY', default='helloworld')
 
 # Security settings (enabled by default in production)
 SECURE_SSL_REDIRECT = env.bool('SECURE_SSL_REDIRECT', default=not DEBUG)
