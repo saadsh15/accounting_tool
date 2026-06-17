@@ -13,7 +13,7 @@ ACCOUNTING_CATEGORIES = [
 def _get_setting(name, default):
     return getattr(settings, name, default)
 
-def _call_deepseek(prompt, temperature=0.0):
+def _call_deepseek(prompt, temperature=0.0, system_message=None):
     """Helper function to call the DeepSeek API."""
     key = _get_setting('DEEPSEEK_API_KEY', '')
     url = _get_setting('DEEPSEEK_API_URL', 'https://api.deepseek.com/v1/chat/completions')
@@ -25,11 +25,14 @@ def _call_deepseek(prompt, temperature=0.0):
         "Content-Type": "application/json"
     }
     
+    messages = []
+    if system_message:
+        messages.append({"role": "system", "content": system_message})
+    messages.append({"role": "user", "content": prompt})
+    
     payload = {
-        "model": "deepseek-chat", # the standard chat model for deepseek
-        "messages": [
-            {"role": "user", "content": prompt}
-        ],
+        "model": "deepseek-chat",
+        "messages": messages,
         "temperature": temperature,
         "stream": False
     }
@@ -59,6 +62,33 @@ def _call_ollama(prompt, temperature=0.0):
     return data.get("response", "").strip()
 
 
+# Explicit categorization rules to embed in the AI prompt
+CATEGORIZATION_RULES = """
+RULES — follow these strictly:
+- "PAYROLL", "SALARY", "WAGE", "DIRECT DEPOSIT", "PREAUTHORIZED CREDIT" (from employer/payroll), "SOCIAL SECURITY", "SSA", "US TREASURY", "TAX REFUND", "INTEREST CREDIT" → Income
+- "RENT", "MORTGAGE", "LEASE PAYMENT", "APARTMENT RENT", "HOUSING" → Rent/Mortgage
+- "ELECTRIC", "GAS BILL", "WATER", "SEWER", "INTERNET", "CABLE", "PHONE BILL", "MOBILE", "UTILITY" → Utilities
+- "WAL-MART", "WALMART", "GROCERY", "KROGER", "SAFEWAY", "ALDI", "COSTCO", "DILLONS", "FOOD", "SUPERMARKET", "MARKET" → Groceries
+- "RESTAURANT", "CAFE", "COFFEE", "STARBUCKS", "MCDONALD", "PIZZA", "BAR", "GRILL", "DELI", "DINING", "DINER", "BISTRO" → Dining Out
+- "GAS STATION", "PETROL", "FUEL", "UBER", "LYFT", "TAXI", "PARKING", "TRANSIT", "BUS", "TRAIN", "AIRLINE", "FLIGHT" → Transportation
+- "INSURANCE", "GEICO", "STATE FARM", "ALLSTATE", "PROGRESSIVE", "HOME INSURANCE" → Insurance
+- "NETFLIX", "SPOTIFY", "HULU", "DISNEY", "CINEMA", "MOVIE", "THEATER", "GAMING", "SPORTS", "CONCERT", "TICKET" → Entertainment
+- "PHARMACY", "HOSPITAL", "DOCTOR", "MEDICAL", "DENTAL", "VISION", "HEALTH", "CLINIC", "CVS", "WALGREENS" → Healthcare
+- "SALON", "BARBER", "SPA", "GYM", "FITNESS", "BEAUTY", "COSMETIC", "DRY CLEAN" → Personal Care
+- "LOAN PAYMENT", "CREDIT CARD PAYMENT", "STUDENT LOAN", "CAR PAYMENT", "DEBT" → Debt Payments
+- "401K", "IRA", "INVESTMENT", "BROKERAGE", "SAVINGS TRANSFER", "MUTUAL FUND", "STOCK" → Savings/Investments
+- "TUITION", "SCHOOL", "UNIVERSITY", "COLLEGE", "BOOK", "COURSE", "TRAINING" → Education
+- "SERVICE CHARGE", "MONTHLY FEE", "OVERDRAFT", "ATM FEE", "BANK FEE", "MAINTENANCE FEE", "NSF FEE" → Bank Fees
+- "HOME DEPOT", "LOWES", "HARDWARE", "JEWELER", "AMAZON", "TARGET", "DEPARTMENT STORE", generic "POS PURCHASE", "CHECK", "ATM WITHDRAWAL", anything else → Miscellaneous
+
+CRITICAL RULES FOR CREDITS AND DEBITS:
+- If the amount is POSITIVE (a credit/deposit) and the description mentions PAYROLL, CREDIT, DEPOSIT, TREASURY, or SSA → ALWAYS categorize as "Income"
+- "PREAUTHORIZED CREDIT" with a positive amount is almost always "Income" (payroll or government payment)
+- "ATM WITHDRAWAL" is "Miscellaneous" (we don't know what cash was used for)
+- Generic "POS PURCHASE" without a merchant name is "Miscellaneous"
+- Generic "CHECK" without details is "Miscellaneous"
+"""
+
 def categorize_transaction_with_ai(description, amount):
     """
     Asks the configured AI model to categorize a single transaction description.
@@ -66,24 +96,33 @@ def categorize_transaction_with_ai(description, amount):
     ai_provider = _get_setting('AI_PROVIDER', 'ollama').lower()
     safe_description = re.sub(r'[^\w\s-]', '', description)[:200]
     
-    prompt = f"""
-You are an expert, meticulous accountant. Categorize the following bank transaction into EXACTLY ONE of the provided categories.
-Do not provide any explanation, preamble, or formatting. Output only the category name exactly as it appears in the list.
+    system_message = """You are an expert, meticulous accountant who categorizes bank transactions with extreme precision.
+You MUST output ONLY the category name — no explanation, no quotes, no punctuation, no preamble.
+You MUST pick from the provided category list. Never invent new categories."""
+    
+    amount_type = "CREDIT/DEPOSIT (money IN)" if amount >= 0 else "DEBIT/WITHDRAWAL (money OUT)"
+    
+    prompt = f"""Categorize this bank transaction into EXACTLY ONE category.
 
 Categories: {', '.join(ACCOUNTING_CATEGORIES)}
 
+{CATEGORIZATION_RULES}
+
 Transaction Description: "{safe_description}"
-Amount: {amount}
-"""
+Amount: {amount} ({amount_type})
+
+Output ONLY the category name, nothing else:"""
 
     try:
         if ai_provider == 'deepseek':
-            category = _call_deepseek(prompt, temperature=0.0)
+            category = _call_deepseek(prompt, temperature=0.0, system_message=system_message)
         else:
             category = _call_ollama(prompt, temperature=0.0)
         
         # Clean up output
         category = category.replace('"', '').replace("'", "").replace(".", "").strip()
+        # Remove any trailing/leading whitespace or newlines
+        category = category.split('\n')[0].strip()
         
         # Fallback if hallucinated
         if category not in ACCOUNTING_CATEGORIES:

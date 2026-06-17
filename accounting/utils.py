@@ -52,24 +52,53 @@ def ocr_via_ocr_space(file_path):
         print(f"Failed to call OCR.space API: {e}")
         return ""
 
+# Vague/generic description patterns that indicate the AI won't have enough context
+VAGUE_DESCRIPTIONS = {
+    'POS PURCHASE', 'POSPURCHASE', 'POS', 'PURCHASE',
+    'CHECK', 'ATM WITHDRAWAL', 'ATM', 'WITHDRAWAL',
+    'DEBIT', 'CREDIT', 'PREAUTHORIZED CREDIT', 'PREAUTHORIZED',
+    'DIRECT DEBIT', 'DIRECT DEPOSIT', 'TRANSFER',
+}
+
+def _is_vague_description(description):
+    """Check if a transaction description is too vague for accurate categorization."""
+    cleaned = re.sub(r'\d+', '', description).strip().upper()
+    return cleaned in VAGUE_DESCRIPTIONS or any(cleaned == v for v in VAGUE_DESCRIPTIONS)
+
+
 def extract_transactions_with_ai(text):
     """
     Asks the configured AI model to extract transactions from raw text.
     Returns a list of dicts: [{'date_str': 'YYYY-MM-DD', 'description': '...', 'amount': Decimal, 'category': '...'}]
     """
-    from .ai_service import ACCOUNTING_CATEGORIES, _call_deepseek, _call_ollama
+    from .ai_service import ACCOUNTING_CATEGORIES, CATEGORIZATION_RULES, _call_deepseek, _call_ollama
     
     ai_provider = getattr(settings, 'AI_PROVIDER', 'ollama').lower()
     categories_str = ", ".join(ACCOUNTING_CATEGORIES)
+    
+    system_message = """You are an expert financial data extraction system that reads bank statement text and extracts structured transaction data.
+You MUST output ONLY a valid JSON array. No explanation, no markdown, no preamble."""
+    
     prompt = f"""
-You are an expert financial data extraction system. Analyze the following raw bank statement text and extract all transactions.
+Analyze the following raw bank statement text and extract ALL transactions.
+
+IMPORTANT: The statement may have MULTIPLE sections. A summary table on one page may list short descriptions,
+while a detailed section on another page provides full merchant names. You MUST cross-reference both sections
+to produce the MOST DETAILED description possible for each transaction.
+
+For example, if the summary says "POS PURCHASE 4.23" and the detail section says 
+"POS PURCHASE TERMINAL 24349201 WAL-MART #3492", use the detailed description "POS PURCHASE WAL-MART" 
+and the amount from the summary.
+
 For each transaction, extract:
 - date: formatted as YYYY-MM-DD. If the statement only provides MM/DD, assume the year is the current year (2026).
-- description: clean, readable description of the transaction.
+- description: the MOST DETAILED description available (include merchant names when found in the statement).
 - amount: the decimal amount. Deposits/credits must be positive. Withdrawals/debits/charges must be negative.
-- category: categorize the transaction into EXACTLY ONE of these categories: {categories_str}. If none fit, use "Miscellaneous".
+- category: categorize into EXACTLY ONE of these categories: {categories_str}
 
-Format the output as a valid JSON array of objects, with no other text, explanation, or markdown formatting. Example:
+{CATEGORIZATION_RULES}
+
+Format the output as a valid JSON array of objects. Example:
 [
   {{"date": "2026-10-02", "description": "POS PURCHASE WAL-MART", "amount": -4.23, "category": "Groceries"}},
   {{"date": "2026-10-03", "description": "PREAUTHORIZED CREDIT PAYROLL", "amount": 763.01, "category": "Income"}}
@@ -80,7 +109,7 @@ Here is the raw bank statement text:
 """
     try:
         if ai_provider == 'deepseek':
-            response_text = _call_deepseek(prompt, temperature=0.0)
+            response_text = _call_deepseek(prompt, temperature=0.0, system_message=system_message)
         else:
             response_text = _call_ollama(prompt, temperature=0.0)
             
@@ -166,12 +195,12 @@ def process_statement(statement):
 
     lines = text.split('\n')
     
-    # Broadened regex patterns:
+    # Broadened regex patterns — use \d+ to handle any number of digits
     # 1. Standard: Date: MM/DD/YYYY, Description, Amount
-    pattern_standard = re.compile(r'^(\d{1,4}[-/]\d{1,2}[-/]\d{1,4})\s+(.+?)\s+([+-]?\$?\d{1,3}(?:,\d{3})*\.\d{2})$')
+    pattern_standard = re.compile(r'^(\d{1,4}[-/]\d{1,2}[-/]\d{1,4})\s+(.+?)\s+([+-]?\$?[\d,]+\.\d{2})$')
     
     # 2. Dummy Statement format: MM/DD Description Amount Balance (e.g., 10/02 POS PURCHASE 4.23 65.73)
-    pattern_dummy = re.compile(r'^(\d{2}/\d{2})\s+(.+?)\s+([+-]?\$?\d{1,3}(?:,\d{3})*\.\d{2}|\.\d{2})\s+([+-]?\$?\d{1,3}(?:,\d{3})*\.\d{2})$')
+    pattern_dummy = re.compile(r'^(\d{2}/\d{2})\s+(.+?)\s+([+-]?\$?[\d,]+\.\d{2}|\.\d{2})\s+([+-]?\$?[\d,]+\.\d{2})$')
     
     rules = CategoryRule.objects.filter(organization=statement.account.organization)
     
@@ -260,10 +289,23 @@ def process_statement(statement):
             transactions_created += 1
         except (ValueError, InvalidOperation):
             continue
-            
-    # AI Fallback Extraction if regex failed to extract anything
+    
+    # Hybrid check: if regex extracted transactions but most have vague descriptions,
+    # discard them and use AI full-text extraction for better categorization
+    if transactions_created > 0 and text.strip():
+        all_txs = Transaction.objects.filter(statement=statement)
+        vague_count = sum(1 for tx in all_txs if _is_vague_description(tx.description))
+        total_count = all_txs.count()
+        
+        if total_count > 0 and (vague_count / total_count) > 0.5:
+            print(f"Hybrid check: {vague_count}/{total_count} transactions have vague descriptions. "
+                  f"Discarding regex results and using AI full-text extraction...")
+            all_txs.delete()
+            transactions_created = 0
+    
+    # AI Fallback Extraction if regex failed or descriptions were too vague
     if transactions_created == 0 and text.strip():
-        print("Regex extraction returned 0 transactions. Falling back to AI extraction...")
+        print("Using AI full-text extraction for better categorization...")
         ai_txs = extract_transactions_with_ai(text)
         for tx in ai_txs:
             try:
