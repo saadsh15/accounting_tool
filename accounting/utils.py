@@ -57,8 +57,9 @@ def extract_transactions_with_ai(text):
     Asks the configured AI model to extract transactions from raw text.
     Returns a list of dicts: [{'date_str': 'YYYY-MM-DD', 'description': '...', 'amount': Decimal, 'category': '...'}]
     """
-    from .ai_service import ACCOUNTING_CATEGORIES, AI_PROVIDER, _call_deepseek, _call_ollama
+    from .ai_service import ACCOUNTING_CATEGORIES, _call_deepseek, _call_ollama
     
+    ai_provider = getattr(settings, 'AI_PROVIDER', 'ollama').lower()
     categories_str = ", ".join(ACCOUNTING_CATEGORIES)
     prompt = f"""
 You are an expert financial data extraction system. Analyze the following raw bank statement text and extract all transactions.
@@ -78,7 +79,7 @@ Here is the raw bank statement text:
 {text}
 """
     try:
-        if AI_PROVIDER == 'deepseek':
+        if ai_provider == 'deepseek':
             response_text = _call_deepseek(prompt, temperature=0.0)
         else:
             response_text = _call_ollama(prompt, temperature=0.0)
@@ -106,7 +107,7 @@ Here is the raw bank statement text:
                     except ValueError:
                         tx['date'] = datetime.today().strftime('%Y-%m-%d')
                 
-                category = tx.get('category', 'Uncategorized')
+                category = tx.get('category', 'Miscellaneous')
                 if category not in ACCOUNTING_CATEGORIES:
                     matched = False
                     for valid_cat in ACCOUNTING_CATEGORIES:
@@ -115,7 +116,7 @@ Here is the raw bank statement text:
                             matched = True
                             break
                     if not matched:
-                        category = "Uncategorized"
+                        category = "Miscellaneous"
                 
                 validated_txs.append({
                     'date_str': tx['date'],
@@ -229,15 +230,24 @@ def process_statement(statement):
             amount = Decimal(clean_amount)
             
             # Auto-categorize (Rule-based engine)
-            category = "Uncategorized"
+            category = "Miscellaneous"
             for rule in rules:
                 if rule.keyword.lower() in description.lower():
                     category = rule.category_name
                     break
             
-            # AI Fallback: If no rule matched, let Ollama categorize it
-            if category == "Uncategorized":
+            # AI Fallback: If no rule matched, let AI categorize it
+            if category == "Miscellaneous":
                 category = categorize_transaction_with_ai(description, float(amount))
+                
+            # Final validation: Ensure it is a standard category
+            from .ai_service import ACCOUNTING_CATEGORIES
+            matched_cat = None
+            for std_cat in ACCOUNTING_CATEGORIES:
+                if std_cat.lower() == category.lower():
+                    matched_cat = std_cat
+                    break
+            category = matched_cat if matched_cat else "Miscellaneous"
                     
             Transaction.objects.create(
                 statement=statement,
@@ -268,10 +278,14 @@ def process_statement(statement):
                         category = rule.category_name
                         break
                         
-                # If category is still Uncategorized/Miscellaneous, we keep AI category
-                if category == "Uncategorized" or category == "Miscellaneous":
-                    if tx['category'] != "Uncategorized" and tx['category'] != "Miscellaneous":
-                        category = tx['category']
+                # Final validation: Ensure it is a standard category
+                from .ai_service import ACCOUNTING_CATEGORIES
+                matched_cat = None
+                for std_cat in ACCOUNTING_CATEGORIES:
+                    if std_cat.lower() == category.lower():
+                        matched_cat = std_cat
+                        break
+                category = matched_cat if matched_cat else "Miscellaneous"
                 
                 Transaction.objects.create(
                     statement=statement,

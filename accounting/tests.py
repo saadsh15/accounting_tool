@@ -75,6 +75,7 @@ class SecurityTests(TestCase):
         self.assertEqual(Statement.objects.count(), 0)
 
     @patch('accounting.ai_service.requests.post')
+    @override_settings(AI_PROVIDER='ollama')
     def test_prompt_sanitization(self, mock_post):
         """Test that malicious characters are stripped from transaction descriptions."""
         mock_post.return_value.status_code = 200
