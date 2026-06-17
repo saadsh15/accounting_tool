@@ -211,6 +211,8 @@ def process_statement(statement):
     print(text[:500] + ("..." if len(text) > 500 else ""))
     print("---------------------------------------")
 
+    # Phase 1: Collect all regex matches into a list WITHOUT calling AI yet
+    regex_parsed = []
     for line in lines:
         line_clean = line.strip()
         match = pattern_standard.match(line_clean)
@@ -257,20 +259,42 @@ def process_statement(statement):
 
         try:
             amount = Decimal(clean_amount)
-            
+            regex_parsed.append({
+                'date_obj': date_obj,
+                'description': description.strip(),
+                'amount': amount,
+            })
+        except (ValueError, InvalidOperation):
+            continue
+    
+    # Phase 2: Pre-scan for vague descriptions BEFORE calling AI or saving to DB
+    # This avoids making 20+ wasteful individual API calls when we'll discard results anyway
+    use_ai_extraction = False
+    if regex_parsed:
+        vague_count = sum(1 for tx in regex_parsed if _is_vague_description(tx['description']))
+        total_count = len(regex_parsed)
+        
+        if total_count > 0 and (vague_count / total_count) > 0.5:
+            print(f"Pre-scan: {vague_count}/{total_count} regex descriptions are vague. "
+                  f"Skipping individual categorization — will use AI full-text extraction instead.")
+            use_ai_extraction = True
+    
+    # Phase 3: If descriptions are specific enough, save with individual AI categorization
+    if regex_parsed and not use_ai_extraction:
+        from .ai_service import ACCOUNTING_CATEGORIES
+        for tx in regex_parsed:
             # Auto-categorize (Rule-based engine)
             category = "Miscellaneous"
             for rule in rules:
-                if rule.keyword.lower() in description.lower():
+                if rule.keyword.lower() in tx['description'].lower():
                     category = rule.category_name
                     break
             
             # AI Fallback: If no rule matched, let AI categorize it
             if category == "Miscellaneous":
-                category = categorize_transaction_with_ai(description, float(amount))
+                category = categorize_transaction_with_ai(tx['description'], float(tx['amount']))
                 
             # Final validation: Ensure it is a standard category
-            from .ai_service import ACCOUNTING_CATEGORIES
             matched_cat = None
             for std_cat in ACCOUNTING_CATEGORIES:
                 if std_cat.lower() == category.lower():
@@ -281,27 +305,12 @@ def process_statement(statement):
             Transaction.objects.create(
                 statement=statement,
                 account=statement.account,
-                date=date_obj,
-                description=description.strip(),
-                amount=amount,
+                date=tx['date_obj'],
+                description=tx['description'],
+                amount=tx['amount'],
                 category=category
             )
             transactions_created += 1
-        except (ValueError, InvalidOperation):
-            continue
-    
-    # Hybrid check: if regex extracted transactions but most have vague descriptions,
-    # discard them and use AI full-text extraction for better categorization
-    if transactions_created > 0 and text.strip():
-        all_txs = Transaction.objects.filter(statement=statement)
-        vague_count = sum(1 for tx in all_txs if _is_vague_description(tx.description))
-        total_count = all_txs.count()
-        
-        if total_count > 0 and (vague_count / total_count) > 0.5:
-            print(f"Hybrid check: {vague_count}/{total_count} transactions have vague descriptions. "
-                  f"Discarding regex results and using AI full-text extraction...")
-            all_txs.delete()
-            transactions_created = 0
     
     # AI Fallback Extraction if regex failed or descriptions were too vague
     if transactions_created == 0 and text.strip():
