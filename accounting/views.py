@@ -1,12 +1,14 @@
 from django.shortcuts import render, redirect, get_object_or_404
 import os
 from django.contrib.auth.decorators import login_required
+from django.views.decorators.cache import never_cache
 from .models import Account, Statement, Transaction
 from core.models import Organization
 from .utils import process_statement
 from django.contrib import messages
 
 @login_required
+@never_cache
 def upload_statement(request):
     # Ensure the user has an organization (e.g., if created via createsuperuser)
     if not request.user.organization:
@@ -58,6 +60,7 @@ def upload_statement(request):
     return render(request, 'accounting/upload.html', {'accounts': accounts})
 
 @login_required
+@never_cache
 def add_account(request):
     if not request.user.organization:
         org = Organization.objects.create(name=f"{request.user.username}'s Organization")

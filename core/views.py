@@ -1,5 +1,6 @@
 from django.shortcuts import render, redirect
 from django.contrib.auth.decorators import login_required
+from django.views.decorators.cache import never_cache
 from django.contrib.auth import login
 from django.http import HttpResponse
 import csv
@@ -9,7 +10,13 @@ from accounting.ai_service import generate_financial_insights
 from django.db.models import Sum
 from decimal import Decimal
 
+def landing_page(request):
+    if request.user.is_authenticated:
+        return redirect('dashboard')
+    return render(request, 'core/landing.html')
+
 @login_required
+@never_cache
 def dashboard(request):
     transactions = []
     total_income = Decimal('0.00')
@@ -48,6 +55,7 @@ def dashboard(request):
     return render(request, 'core/dashboard.html', context)
 
 @login_required
+@never_cache
 def ai_insights(request):
     insights = None
     if request.user.organization:
@@ -83,6 +91,7 @@ def signup(request):
     return render(request, 'registration/signup.html', {'form': form})
 
 @login_required
+@never_cache
 def download_csv(request):
     response = HttpResponse(content_type='text/csv')
     response['Content-Disposition'] = 'attachment; filename="accounting_data.csv"'

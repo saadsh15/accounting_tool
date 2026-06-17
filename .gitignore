@@ -15,7 +15,12 @@ db.sqlite3-journal
 # Media & Static Files
 media/
 staticfiles/
-static/
+
+# IDEs and Editors
+.vscode/
+.idea/
+*.swp
+*.swo
 
 # OS generated files
 .DS_Store

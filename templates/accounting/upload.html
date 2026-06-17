@@ -3,64 +3,55 @@
 {% block title %}Upload Statement{% endblock %}
 
 {% block content %}
-<div class="max-w-3xl mx-auto">
-    <div class="bg-white shadow px-4 py-5 sm:rounded-lg sm:p-6">
-        <div class="md:grid md:grid-cols-3 md:gap-6">
-            <div class="md:col-span-1">
-                <h3 class="text-lg font-medium leading-6 text-gray-900">Upload Statement</h3>
-                <p class="mt-1 text-sm text-gray-500">
-                    Upload your bank statement (PDF or Image) to automatically extract and categorize transactions.
-                </p>
-            </div>
-            <div class="mt-5 md:mt-0 md:col-span-2">
-                <form action="{% url 'upload_statement' %}" method="POST" enctype="multipart/form-data">
-                    {% csrf_token %}
-                    <div class="grid grid-cols-6 gap-6">
-                        <div class="col-span-6 sm:col-span-4">
-                            <div class="flex justify-between items-center">
-                                <label for="account" class="block text-sm font-medium text-gray-700">Bank Account</label>
-                                <a href="{% url 'add_account' %}" class="text-sm font-medium text-indigo-600 hover:text-indigo-500">
-                                    + Add New Account
-                                </a>
-                            </div>
-                            <select id="account" name="account" class="mt-1 block w-full py-2 px-3 border border-gray-300 bg-white rounded-md shadow-sm focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm">
-                                {% for account in accounts %}
-                                    <option value="{{ account.id }}">{{ account.name }}</option>
-                                {% endfor %}
-                            </select>
-                        </div>
+<div class="card" style="max-width: 800px; margin: 0 auto;">
+    <div style="margin-bottom: 2rem;">
+        <h2>Upload Statement</h2>
+        <p class="text-muted">Upload your bank statement (PDF or Image) to automatically extract and categorize transactions locally using AI.</p>
+    </div>
 
-                        <div class="col-span-6">
-                            <label class="block text-sm font-medium text-gray-700">Statement File</label>
-                            <div id="drop-zone" class="mt-1 flex justify-center px-6 pt-5 pb-6 border-2 border-gray-300 border-dashed rounded-md transition-colors duration-200 ease-in-out">
-                                <div class="space-y-1 text-center">
-                                    <svg class="mx-auto h-12 w-12 text-gray-400" stroke="currentColor" fill="none" viewBox="0 0 48 48" aria-hidden="true">
-                                        <path d="M28 8H12a4 4 0 00-4 4v20m32-12v8m0 0v8a4 4 0 01-4 4H12a4 4 0 01-4-4v-4m32-4l-3.172-3.172a4 4 0 00-5.656 0L28 28M8 32l9.172-9.172a4 4 0 015.656 0L28 28m0 0l4 4m4-24h8m-4-4v8m-12 4h.02" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" />
-                                    </svg>
-                                    <div class="flex text-sm text-gray-600 justify-center">
-                                        <label for="file-upload" class="relative cursor-pointer bg-white rounded-md font-medium text-indigo-600 hover:text-indigo-500 focus-within:outline-none focus-within:ring-2 focus-within:ring-offset-2 focus-within:ring-indigo-500">
-                                            <span>Upload a file</span>
-                                            <input id="file-upload" name="statement_file" type="file" class="sr-only" required accept=".pdf,.png,.jpg,.jpeg">
-                                        </label>
-                                        <p class="pl-1">or drag and drop</p>
-                                    </div>
-                                    <p class="text-xs text-gray-500">
-                                        PDF, PNG, JPG up to 10MB
-                                    </p>
-                                    <p id="file-name-display" class="text-sm font-semibold text-indigo-600 mt-2 hidden"></p>
-                                </div>
-                            </div>
-                        </div>
-                    </div>
-                    <div class="mt-6 flex justify-end">
-                        <button type="submit" class="ml-3 inline-flex justify-center py-2 px-4 border border-transparent shadow-sm text-sm font-medium rounded-md text-white bg-indigo-600 hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500">
-                            Process Statement
-                        </button>
-                    </div>
-                </form>
+    <form action="{% url 'upload_statement' %}" method="POST" enctype="multipart/form-data">
+        {% csrf_token %}
+        
+        <div class="form-group">
+            <div class="flex-between" style="margin-bottom: 0.5rem;">
+                <label for="account" style="margin-bottom: 0;">Bank Account</label>
+                <a href="{% url 'add_account' %}" class="text-accent" style="font-size: 0.875rem; font-weight: 500;">+ Add New Account</a>
+            </div>
+            <select id="account" name="account" required>
+                {% for account in accounts %}
+                    <option value="{{ account.id }}">{{ account.name }}</option>
+                {% empty %}
+                    <option value="" disabled>No accounts available. Please add one first.</option>
+                {% endfor %}
+            </select>
+        </div>
+
+        <div class="form-group">
+            <label>Statement File</label>
+            <div id="drop-zone" class="drop-zone">
+                <div class="drop-icon">
+                    <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                        <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+                        <polyline points="17 8 12 3 7 8"></polyline>
+                        <line x1="12" y1="3" x2="12" y2="15"></line>
+                    </svg>
+                </div>
+                <div style="margin-bottom: 0.5rem;">
+                    <label for="file-upload" style="display: inline; cursor: pointer; color: var(--accent); font-weight: 600; font-size: 1rem;">
+                        <span>Click to upload</span>
+                        <input id="file-upload" name="statement_file" type="file" style="display: none;" required accept=".pdf,.png,.jpg,.jpeg">
+                    </label>
+                    <span> or drag and drop</span>
+                </div>
+                <p class="text-muted" style="font-size: 0.875rem; margin: 0 auto;">PDF, PNG, JPG up to 5MB</p>
+                <p id="file-name-display" class="text-accent" style="margin-top: 1rem; font-weight: 600; display: none;"></p>
             </div>
         </div>
-    </div>
+
+        <div style="display: flex; justify-content: flex-end; margin-top: 2rem;">
+            <button type="submit" class="btn btn-primary">Process Statement</button>
+        </div>
+    </form>
 </div>
 
 <script>
@@ -69,25 +60,20 @@
         const fileInput = document.getElementById('file-upload');
         const fileNameDisplay = document.getElementById('file-name-display');
 
-        // Prevent default drag behaviors
         ['dragenter', 'dragover', 'dragleave', 'drop'].forEach(eventName => {
             dropZone.addEventListener(eventName, preventDefaults, false);
             document.body.addEventListener(eventName, preventDefaults, false);
         });
 
-        // Highlight drop zone when item is dragged over it
         ['dragenter', 'dragover'].forEach(eventName => {
-            dropZone.addEventListener(eventName, highlight, false);
+            dropZone.addEventListener(eventName, () => dropZone.classList.add('dragover'), false);
         });
 
         ['dragleave', 'drop'].forEach(eventName => {
-            dropZone.addEventListener(eventName, unhighlight, false);
+            dropZone.addEventListener(eventName, () => dropZone.classList.remove('dragover'), false);
         });
 
-        // Handle dropped files
         dropZone.addEventListener('drop', handleDrop, false);
-
-        // Handle files selected via file input
         fileInput.addEventListener('change', handleFiles, false);
 
         function preventDefaults (e) {
@@ -95,34 +81,21 @@
             e.stopPropagation();
         }
 
-        function highlight(e) {
-            dropZone.classList.add('border-indigo-500', 'bg-indigo-50');
-            dropZone.classList.remove('border-gray-300');
-        }
-
-        function unhighlight(e) {
-            dropZone.classList.remove('border-indigo-500', 'bg-indigo-50');
-            dropZone.classList.add('border-gray-300');
-        }
-
         function handleDrop(e) {
             const dt = e.dataTransfer;
             const files = dt.files;
-
             if (files.length) {
-                fileInput.files = files; // Update the file input
-                handleFiles(); // Update the UI
+                fileInput.files = files;
+                handleFiles();
             }
         }
 
         function handleFiles() {
             if (fileInput.files.length > 0) {
-                const file = fileInput.files[0];
-                fileNameDisplay.textContent = `Selected file: ${file.name}`;
-                fileNameDisplay.classList.remove('hidden');
+                fileNameDisplay.textContent = `Selected: ${fileInput.files[0].name}`;
+                fileNameDisplay.style.display = 'block';
             } else {
-                fileNameDisplay.textContent = '';
-                fileNameDisplay.classList.add('hidden');
+                fileNameDisplay.style.display = 'none';
             }
         }
     });

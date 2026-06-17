@@ -3,84 +3,66 @@
 {% block title %}Dashboard{% endblock %}
 
 {% block content %}
-<div class="px-4 py-6 sm:px-0">
-    <div class="flex justify-between items-center mb-6">
-        <h1 class="text-2xl font-semibold text-gray-900">Dashboard</h1>
-        <div class="flex space-x-3">
-            <a href="{% url 'download_csv' %}" class="inline-flex items-center px-4 py-2 border border-gray-300 shadow-sm text-sm font-medium rounded-md text-gray-700 bg-white hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500">
-                <svg class="-ml-1 mr-2 h-5 w-5 text-gray-500" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"></path></svg>
-                Export CSV
-            </a>
-            <a href="{% url 'ai_insights' %}" class="inline-flex items-center px-4 py-2 border border-gray-300 shadow-sm text-sm font-medium rounded-md text-gray-700 bg-white hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500">
-                <svg class="-ml-1 mr-2 h-5 w-5 text-gray-500" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"></path></svg>
-                AI Insights
-            </a>
-            <a href="{% url 'upload_statement' %}" class="inline-flex items-center px-4 py-2 border border-transparent text-sm font-medium rounded-md shadow-sm text-white bg-indigo-600 hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500">
-                Upload Statement
-            </a>
+<div class="flex-between" style="margin-bottom: 2rem;">
+    <h1>Dashboard</h1>
+    <div style="display: flex; gap: 1rem;">
+        <a href="{% url 'download_csv' %}" class="btn btn-outline">Export CSV</a>
+        <a href="{% url 'ai_insights' %}" class="btn btn-outline">AI Insights</a>
+        <a href="{% url 'upload_statement' %}" class="btn btn-primary">Upload Statement</a>
+    </div>
+</div>
+
+<div class="grid-3" style="margin-bottom: 3rem;">
+    <div class="card">
+        <div class="stat-title">Total Income</div>
+        <div class="stat-value text-success">${{ total_income }}</div>
+    </div>
+    <div class="card">
+        <div class="stat-title">Total Expenses</div>
+        <div class="stat-value text-danger">${{ total_expenses }}</div>
+    </div>
+    <div class="card">
+        <div class="stat-title">Net Balance</div>
+        <div class="stat-value {% if net_balance < 0 %}text-danger{% else %}text-success{% endif %}">${{ net_balance }}</div>
+    </div>
+</div>
+
+<div class="grid-2">
+    <div class="card flex flex-col">
+        <h3 style="margin-bottom: 1.5rem;">Expenses by Category</h3>
+        <div style="position: relative; height: 350px; width: 100%;">
+            <canvas id="categoryChart"></canvas>
         </div>
     </div>
-
-    <div class="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
-        <div class="bg-white overflow-hidden shadow rounded-lg">
-            <div class="px-4 py-5 sm:p-6">
-                <dt class="text-sm font-medium text-gray-500 truncate">Total Income</dt>
-                <dd class="mt-1 text-3xl font-semibold text-green-600">$<span id="totalIncome">{{ total_income }}</span></dd>
-            </div>
-        </div>
-        <div class="bg-white overflow-hidden shadow rounded-lg">
-            <div class="px-4 py-5 sm:p-6">
-                <dt class="text-sm font-medium text-gray-500 truncate">Total Expenses</dt>
-                <dd class="mt-1 text-3xl font-semibold text-red-600">$<span id="totalExpenses">{{ total_expenses }}</span></dd>
-            </div>
-        </div>
-        <div class="bg-white overflow-hidden shadow rounded-lg">
-            <div class="px-4 py-5 sm:p-6">
-                <dt class="text-sm font-medium text-gray-500 truncate">Net Balance</dt>
-                <dd class="mt-1 text-3xl font-semibold {% if net_balance < 0 %}text-red-600{% else %}text-indigo-600{% endif %}">$<span id="netBalance">{{ net_balance }}</span></dd>
-            </div>
-        </div>
-    </div>
-
-    <div class="grid grid-cols-1 lg:grid-cols-2 gap-8">
-        <div class="bg-white p-6 shadow rounded-lg flex flex-col">
-            <h3 class="text-lg leading-6 font-medium text-gray-900 mb-4">Expenses by Category</h3>
-            <div class="relative flex-1" style="min-height: 300px;">
-                <canvas id="categoryChart"></canvas>
-            </div>
-        </div>
-        <div class="bg-white p-6 shadow rounded-lg">
-            <h3 class="text-lg leading-6 font-medium text-gray-900 mb-4">Recent Transactions</h3>
-            <div class="overflow-x-auto">
-                <table class="min-w-full divide-y divide-gray-200">
-                    <thead class="bg-gray-50">
-                        <tr>
-                            <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Date</th>
-                            <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Description</th>
-                            <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Amount</th>
-                            <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Category</th>
-                        </tr>
-                    </thead>
-                    <tbody class="bg-white divide-y divide-gray-200">
-                        {% for tx in transactions %}
-                        <tr>
-                            <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{{ tx.date }}</td>
-                            <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900">{{ tx.description }}</td>
-                            <td class="px-6 py-4 whitespace-nowrap text-sm font-medium {% if tx.amount < 0 %}text-red-600{% else %}text-green-600{% endif %}">{{ tx.amount }}</td>
-                            <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
-                                <span class="px-2 inline-flex text-xs leading-5 font-semibold rounded-full bg-indigo-100 text-indigo-800">
-                                    {{ tx.category|default:"Uncategorized" }}
-                                </span>
-                            </td>
-                        </tr>
-                        {% empty %}
-                        <tr>
-                            <td colspan="4" class="px-6 py-4 text-center text-sm text-gray-500">No recent transactions. Upload a statement to get started.</td>
-                        </tr>
-                        {% endfor %}
-                    </tbody>
-                </table>
-            </div>
+    <div class="card">
+        <h3 style="margin-bottom: 1.5rem;">Recent Transactions</h3>
+        <div class="table-container">
+            <table>
+                <thead>
+                    <tr>
+                        <th>Date</th>
+                        <th>Description</th>
+                        <th>Amount</th>
+                        <th>Category</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for tx in transactions %}
+                    <tr>
+                        <td class="text-muted">{{ tx.date|date:"M d, Y" }}</td>
+                        <td>{{ tx.description }}</td>
+                        <td class="{% if tx.amount < 0 %}text-danger{% else %}text-success{% endif %}">{{ tx.amount }}</td>
+                        <td>
+                            <span class="badge">{{ tx.category|default:"Uncategorized" }}</span>
+                        </td>
+                    </tr>
+                    {% empty %}
+                    <tr>
+                        <td colspan="4" class="text-muted" style="text-align: center; padding: 2rem 0;">No transactions yet. Upload a statement to begin.</td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
         </div>
     </div>
 </div>
@@ -89,54 +71,47 @@
 {{ chart_values|json_script:"chartValues" }}
 
 <script>
-    function downloadChart() {
-        const canvas = document.getElementById('categoryChart');
-        const link = document.createElement('a');
-        link.download = 'expenses_chart.png';
-        
-        // Create a temporary canvas with white background to fix transparency issue
-        const tempCanvas = document.createElement('canvas');
-        tempCanvas.width = canvas.width;
-        tempCanvas.height = canvas.height;
-        const ctx = tempCanvas.getContext('2d');
-        ctx.fillStyle = 'white';
-        ctx.fillRect(0, 0, tempCanvas.width, tempCanvas.height);
-        ctx.drawImage(canvas, 0, 0);
-        
-        link.href = tempCanvas.toDataURL('image/png');
-        link.click();
-    }
-
     document.addEventListener('DOMContentLoaded', function() {
         const labels = JSON.parse(document.getElementById('chartLabels').textContent);
         const data = JSON.parse(document.getElementById('chartValues').textContent);
         
         if(labels.length > 0) {
+            // Chart.js global defaults for dark mode
+            Chart.defaults.color = '#9CA3AF';
+            Chart.defaults.borderColor = '#1A1A1A';
+
             const ctx = document.getElementById('categoryChart').getContext('2d');
             new Chart(ctx, {
                 type: 'doughnut',
                 data: {
                     labels: labels,
                     datasets: [{
-                        label: 'Expenses by Category',
                         data: data,
                         backgroundColor: [
-                            'rgba(255, 99, 132, 0.8)',
-                            'rgba(54, 162, 235, 0.8)',
-                            'rgba(255, 206, 86, 0.8)',
-                            'rgba(75, 192, 192, 0.8)',
-                            'rgba(153, 102, 255, 0.8)',
-                            'rgba(255, 159, 64, 0.8)',
-                            'rgba(199, 199, 199, 0.8)',
-                            'rgba(83, 102, 255, 0.8)',
-                            'rgba(255, 99, 255, 0.8)',
+                            '#E2FE53', // Accent
+                            '#FF453A', // Danger
+                            '#32D74B', // Success
+                            '#FF9F0A', // Orange
+                            '#0A84FF', // Blue
+                            '#BF5AF2', // Purple
+                            '#FF375F', // Pink
+                            '#5E5CE6', // Indigo
+                            '#64D2FF'  // Cyan
                         ],
-                        borderWidth: 1
+                        borderWidth: 2,
+                        borderColor: '#0F0F0F' // Match card bg
                     }]
                 },
                 options: {
                     responsive: true,
                     maintainAspectRatio: false,
+                    plugins: {
+                        legend: {
+                            position: 'bottom',
+                            labels: { padding: 20, font: { family: 'Inter' } }
+                        }
+                    },
+                    cutout: '75%'
                 }
             });
         }

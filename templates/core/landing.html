@@ -1,0 +1,79 @@
+{% load static %}
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Accountant | Frictionless Finance</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600&family=Outfit:wght@300;500;700;900&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="{% static 'css/landing.css' %}">
+</head>
+<body>
+    <nav class="navbar reveal">
+        <div class="logo">Accountant.</div>
+        <div class="nav-links">
+            <a href="{% url 'login' %}" class="btn-ghost">Log In</a>
+            <a href="{% url 'signup' %}" class="btn-primary">Get Started</a>
+        </div>
+    </nav>
+
+    <header class="hero">
+        <div class="hero-content">
+            <h1 class="reveal delay-1">Finance, <br> <span class="text-accent">without the friction.</span></h1>
+            <p class="reveal delay-2">Automate your categorization. Uncover financial insights. Say goodbye to spreadsheets.</p>
+            <div class="cta-group reveal delay-3">
+                <a href="{% url 'signup' %}" class="btn-large btn-primary">Start for free</a>
+            </div>
+        </div>
+    </header>
+
+    <section class="features">
+        <div class="feature-row">
+            <div class="feature-text reveal">
+                <h2>01. AI-Powered Extraction</h2>
+                <p>Upload any statement. Our local AI processes PDFs and images instantly, extracting and categorizing every transaction without sending your data to the cloud.</p>
+            </div>
+            <div class="feature-visual reveal" style="background-image: url('{% static "images/feature1.jpg" %}'); background-size: cover; background-position: center; border: 1px solid rgba(255, 255, 255, 0.1);">
+                <div class="glow" style="opacity: 0.4;"></div>
+            </div>
+        </div>
+
+        <div class="feature-row reverse">
+            <div class="feature-text reveal">
+                <h2>02. Actionable Insights</h2>
+                <p>Understand your spending habits in seconds. Receive concise, professional insights generated specifically for your financial situation.</p>
+            </div>
+            <div class="feature-visual reveal" style="background-image: url('{% static "images/feature2.jpg" %}'); background-size: cover; background-position: center; border: 1px solid rgba(255, 255, 255, 0.1);">
+                <div class="glow accent-glow" style="opacity: 0.4;"></div>
+            </div>
+        </div>
+
+        <div class="feature-row">
+            <div class="feature-text reveal">
+                <h2>03. Rule-Based Control</h2>
+                <p>Create custom categorization rules. Teach the system exactly how you want your transactions organized, and let it do the heavy lifting.</p>
+            </div>
+            <div class="feature-visual reveal" style="background-image: url('{% static "images/feature3.jpg" %}'); background-size: cover; background-position: center; border: 1px solid rgba(255, 255, 255, 0.1);">
+                <div class="glow" style="opacity: 0.4;"></div>
+            </div>
+        </div>
+    </section>
+
+    <section class="cta-section reveal">
+        <h2>Ready to take control?</h2>
+        <a href="{% url 'signup' %}" class="btn-large btn-primary mt-8">Create your account</a>
+    </section>
+
+    <footer>
+        <div class="footer-content">
+            <p>&copy; {% now "Y" %} Accountant. Built for privacy and speed.</p>
+        </div>
+    </footer>
+
+    <!-- Lenis Smooth Scroll CDN -->
+    <script src="https://unpkg.com/@studio-freight/lenis@1.0.42/dist/lenis.min.js"></script>
+    <script src="{% static 'js/landing.js' %}"></script>
+</body>
+</html>

@@ -1,58 +1,36 @@
 {% extends "base.html" %}
 
-{% block title %}Add Bank Account{% endblock %}
+{% block title %}Add Account{% endblock %}
 
 {% block content %}
-<div class="max-w-3xl mx-auto">
-    <div class="bg-white shadow px-4 py-5 sm:rounded-lg sm:p-6">
-        <div class="md:grid md:grid-cols-3 md:gap-6">
-            <div class="md:col-span-1">
-                <h3 class="text-lg font-medium leading-6 text-gray-900">Add Bank Account</h3>
-                <p class="mt-1 text-sm text-gray-500">
-                    Add a new bank account to categorize and track your transactions.
-                </p>
-            </div>
-            <div class="mt-5 md:mt-0 md:col-span-2">
-                <form action="{% url 'add_account' %}" method="POST">
-                    {% csrf_token %}
-                    <div class="grid grid-cols-6 gap-6">
-                        <div class="col-span-6 sm:col-span-4">
-                            <label for="name" class="block text-sm font-medium text-gray-700">Account Name *</label>
-                            <input type="text" name="name" id="name" required class="mt-1 focus:ring-indigo-500 focus:border-indigo-500 block w-full shadow-sm sm:text-sm border-gray-300 rounded-md py-2 px-3 border">
-                        </div>
-
-                        <div class="col-span-6 sm:col-span-4">
-                            <label for="bank_name" class="block text-sm font-medium text-gray-700">Bank Name</label>
-                            <input type="text" name="bank_name" id="bank_name" class="mt-1 focus:ring-indigo-500 focus:border-indigo-500 block w-full shadow-sm sm:text-sm border-gray-300 rounded-md py-2 px-3 border">
-                        </div>
-
-                        <div class="col-span-6 sm:col-span-4">
-                            <label for="account_number" class="block text-sm font-medium text-gray-700">Account Number</label>
-                            <input type="text" name="account_number" id="account_number" class="mt-1 focus:ring-indigo-500 focus:border-indigo-500 block w-full shadow-sm sm:text-sm border-gray-300 rounded-md py-2 px-3 border">
-                        </div>
-                    </div>
-                    
-                    {% if messages %}
-                        <div class="mt-4">
-                            {% for message in messages %}
-                                <p class="text-sm {% if message.tags == 'error' %}text-red-600{% else %}text-green-600{% endif %}">
-                                    {{ message }}
-                                </p>
-                            {% endfor %}
-                        </div>
-                    {% endif %}
-
-                    <div class="mt-6 flex justify-end">
-                        <a href="{% url 'upload_statement' %}" class="bg-white py-2 px-4 border border-gray-300 rounded-md shadow-sm text-sm font-medium text-gray-700 hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500">
-                            Cancel
-                        </a>
-                        <button type="submit" class="ml-3 inline-flex justify-center py-2 px-4 border border-transparent shadow-sm text-sm font-medium rounded-md text-white bg-indigo-600 hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500">
-                            Save Account
-                        </button>
-                    </div>
-                </form>
-            </div>
-        </div>
+<div class="card" style="max-width: 600px; margin: 0 auto;">
+    <div style="margin-bottom: 2rem;">
+        <h2>Add Account</h2>
+        <p class="text-muted">Create a new bank account to organize your uploaded statements.</p>
     </div>
+
+    <form action="{% url 'add_account' %}" method="POST">
+        {% csrf_token %}
+        
+        <div class="form-group">
+            <label for="name">Account Nickname</label>
+            <input type="text" id="name" name="name" required placeholder="e.g. Primary Checking" autocomplete="off">
+        </div>
+
+        <div class="form-group">
+            <label for="bank_name">Bank Name (Optional)</label>
+            <input type="text" id="bank_name" name="bank_name" placeholder="e.g. Chase" autocomplete="off">
+        </div>
+
+        <div class="form-group">
+            <label for="account_number">Account Number Last 4 (Optional)</label>
+            <input type="text" id="account_number" name="account_number" placeholder="e.g. 1234" autocomplete="off">
+        </div>
+
+        <div style="display: flex; justify-content: flex-end; gap: 1rem; margin-top: 2rem;">
+            <a href="{% url 'upload_statement' %}" class="btn btn-outline">Cancel</a>
+            <button type="submit" class="btn btn-primary">Save Account</button>
+        </div>
+    </form>
 </div>
 {% endblock %}
