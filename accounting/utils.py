@@ -16,16 +16,23 @@ def process_statement(statement):
         with pdfplumber.open(file_path) as pdf:
             for page in pdf.pages:
                 extracted = page.extract_text()
-                if extracted:
+                if extracted and extracted.strip():
                     text += extracted + "\n"
                 else:
                     # Fallback to OCR if the PDF page is an image
-                    img = page.to_image(resolution=300).original
-                    ocr_text = pytesseract.image_to_string(img)
-                    if ocr_text:
-                        text += ocr_text + "\n"
+                    try:
+                        img = page.to_image(resolution=300).original
+                        ocr_text = pytesseract.image_to_string(img)
+                        if ocr_text:
+                            text += ocr_text + "\n"
+                    except Exception as e:
+                        print(f"Skipped OCR on PDF page due to missing Tesseract: {e}")
+                        
     elif file_path.lower().endswith(('.png', '.jpg', '.jpeg')):
-        text = pytesseract.image_to_string(Image.open(file_path))
+        try:
+            text = pytesseract.image_to_string(Image.open(file_path))
+        except Exception as e:
+            raise Exception("Image uploads require Tesseract OCR, which is not installed in the Vercel serverless environment. Please upload a standard text-based PDF instead.")
 
     lines = text.split('\n')
     
