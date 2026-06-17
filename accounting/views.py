@@ -6,6 +6,7 @@ from .models import Account, Statement, Transaction
 from core.models import Organization
 from .utils import process_statement
 from django.contrib import messages
+from django.conf import settings
 
 @login_required
 @never_cache
@@ -85,4 +86,27 @@ def add_account(request):
             messages.error(request, 'Account name is required.')
             
     return render(request, 'accounting/add_account.html')
+
+@login_required
+@never_cache
+def delete_transaction(request, transaction_id):
+    if request.method == 'POST':
+        password = request.POST.get('root_password')
+        
+        # IDOR Fix: Ensure transaction belongs to the user's organization
+        transaction = get_object_or_404(
+            Transaction, 
+            id=transaction_id, 
+            account__organization=request.user.organization
+        )
+        
+        # Verify root password
+        root_pwd = getattr(settings, 'DELETE_ROOT_PASSWORD', 'root')
+        if password == root_pwd:
+            transaction.delete()
+            messages.success(request, 'Transaction deleted successfully.')
+        else:
+            messages.error(request, 'Incorrect root password. Transaction not deleted.')
+            
+    return redirect('dashboard')
 
