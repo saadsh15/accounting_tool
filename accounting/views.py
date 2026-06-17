@@ -110,3 +110,22 @@ def delete_transaction(request, transaction_id):
             
     return redirect('dashboard')
 
+@login_required
+@never_cache
+def delete_all_accounts(request):
+    if request.method == 'POST':
+        password = request.POST.get('root_password')
+        
+        # Verify root password
+        root_pwd = getattr(settings, 'DELETE_ROOT_PASSWORD', 'root')
+        if password == root_pwd:
+            # Delete all accounts belonging to the user's organization
+            accounts = Account.objects.filter(organization=request.user.organization)
+            count = accounts.count()
+            accounts.delete()
+            messages.success(request, f'Successfully deleted all {count} account(s) and their associated data.')
+        else:
+            messages.error(request, 'Incorrect root password. Accounts were not deleted.')
+            
+    return redirect('upload_statement')
+

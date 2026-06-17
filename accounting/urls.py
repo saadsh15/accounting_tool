@@ -5,4 +5,5 @@ urlpatterns = [
     path('upload/', views.upload_statement, name='upload_statement'),
     path('add-account/', views.add_account, name='add_account'),
     path('delete-transaction/<int:transaction_id>/', views.delete_transaction, name='delete_transaction'),
+    path('delete-all-accounts/', views.delete_all_accounts, name='delete_all_accounts'),
 ]
