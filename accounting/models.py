@@ -1,5 +1,39 @@
 from django.db import models
 from core.models import Organization
+from .providers import PROVIDER_CHOICES, get_provider
+
+
+class AISettings(models.Model):
+    """Per-organization LLM provider choice.
+
+    Absent, the org falls back to the server's .env defaults, so existing
+    installs keep working untouched.
+    """
+    organization = models.OneToOneField(Organization, on_delete=models.CASCADE, related_name='ai_settings')
+    provider = models.CharField(max_length=32, choices=PROVIDER_CHOICES, default='ollama')
+    model = models.CharField(max_length=200, blank=True)
+    # Write-only in the UI: set via the form, never rendered back to the browser.
+    api_key = models.CharField(max_length=255, blank=True)
+    base_url = models.URLField(blank=True, help_text='Overrides the provider default. Leave blank for the default.')
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        verbose_name = 'AI settings'
+        verbose_name_plural = 'AI settings'
+
+    def __str__(self):
+        return f"{self.organization.name}: {self.provider}/{self.model or 'default'}"
+
+    @property
+    def masked_api_key(self):
+        """Enough to confirm which key is set, not enough to use it."""
+        if not self.api_key:
+            return ''
+        return f"{'•' * 8}{self.api_key[-4:]}" if len(self.api_key) > 4 else '•' * 8
+
+    @property
+    def effective_model(self):
+        return self.model or get_provider(self.provider)['default_model']
 
 class Account(models.Model):
     organization = models.ForeignKey(Organization, on_delete=models.CASCADE, related_name='accounts')

@@ -69,10 +69,36 @@ Settings are read from `.env` (see `config/settings.py`).
 | `DATABASE_URL` | SQLite in project root | e.g. `postgres://user:pass@host/db` |
 | `MEDIA_ROOT` | `<project>/media` | **Must be persistent storage.** Uploaded statements are read back by the worker. |
 | `CELERY_BROKER_URL` | `redis://127.0.0.1:6379/0` | |
-| `AI_PROVIDER` | `ollama` | `ollama` (local) or `deepseek` (hosted). |
+| `AI_PROVIDER` | `ollama` | Server-wide default: `ollama`, `deepseek` or `openrouter`. Organizations can override it in the UI. |
+| `AI_MODEL` / `AI_API_KEY` / `AI_BASE_URL` | — | Defaults for hosted providers. |
 | `OLLAMA_URL` / `OLLAMA_MODEL` | `127.0.0.1:11434` / `phi3` | |
-| `DEEPSEEK_API_KEY` | — | Required when `AI_PROVIDER=deepseek`. |
+| `DEEPSEEK_API_KEY` | — | Legacy alias for `AI_API_KEY`. |
+| `SITE_URL` | `http://localhost` | Sent to OpenRouter as the attribution header. |
 | `DELETE_ROOT_PASSWORD` | `root` | Shared secret gating destructive deletes. **Change this.** |
+
+## Choosing a model
+
+Each organization picks its own provider under **AI Settings** (per-org, not per-user).
+Organizations that never touch it fall back to the server's `.env` defaults.
+
+| Provider | Notes |
+| --- | --- |
+| **Ollama** | Runs locally on the VPS. No key, no per-call cost. |
+| **DeepSeek** | Hosted. Needs a DeepSeek key. |
+| **OpenRouter** | One key, every frontier model — Claude, GPT, Gemini, Llama, Grok, Mistral. |
+
+DeepSeek and OpenRouter both speak the OpenAI `/chat/completions` shape, so they share a
+single transport; adding another hosted provider is a new entry in `accounting/providers.py`,
+not new request code.
+
+The OpenRouter model dropdown is **fetched live** from its public catalog (cached for an
+hour) rather than hardcoded, so newly released models appear without a deploy. **Save & Test
+Connection** round-trips a real prompt so a bad key or a mistyped model surfaces immediately
+instead of failing later inside a worker.
+
+API keys are stored per-organization in the database and are **write-only in the UI**: only a
+masked tail is ever rendered back, and submitting a blank field leaves the stored key
+untouched. They are not yet encrypted at rest — treat DB access as equivalent to key access.
 
 If the AI provider is unreachable, extraction degrades gracefully: transactions are still
 saved from the regex parser and categorized as `Miscellaneous` rather than being discarded.

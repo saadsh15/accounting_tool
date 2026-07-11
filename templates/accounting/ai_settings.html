@@ -1,0 +1,144 @@
+{% extends "base.html" %}
+
+{% block title %}AI Settings{% endblock %}
+
+{% block content %}
+<div class="card" style="max-width: 720px; margin: 0 auto;">
+    <div style="margin-bottom: 2rem;">
+        <h2>AI Settings</h2>
+        <p class="text-muted">Choose which model reads your statements and writes your insights.</p>
+    </div>
+
+    <form action="{% url 'ai_settings' %}" method="POST" autocomplete="off">
+        {% csrf_token %}
+
+        <div class="form-group">
+            <label for="provider">Provider</label>
+            <select id="provider" name="provider" required>
+                {% for key, spec in providers.items %}
+                    <option value="{{ key }}" {% if config.provider == key %}selected{% endif %}>{{ spec.label }}</option>
+                {% endfor %}
+            </select>
+            {% for key, spec in providers.items %}
+                <p class="text-muted provider-help" data-provider="{{ key }}" style="margin-top: .5rem; display: none;">{{ spec.help }}</p>
+            {% endfor %}
+        </div>
+
+        <div class="form-group">
+            <label for="model">Model</label>
+
+            <!-- OpenRouter: populated live from its catalog, so new frontier models
+                 appear here without a code change. -->
+            <select id="model-select" name="model" style="display: none;">
+                <option value="">Loading models…</option>
+            </select>
+
+            <!-- Everything else: free text (Ollama tags, deepseek-chat, ...). -->
+            <input type="text" id="model-input" name="model" value="{{ config.model }}"
+                   placeholder="e.g. phi3 or deepseek-chat">
+
+            <p class="text-muted" id="model-help" style="margin-top: .5rem;">
+                Leave blank to use the provider's default.
+            </p>
+        </div>
+
+        <div class="form-group" id="api-key-group">
+            <label for="api_key">API Key</label>
+            {% if config.api_key %}
+                <p class="text-muted" style="margin-bottom: .5rem;">
+                    A key is saved ({{ config.masked_api_key }}). Leave blank to keep it.
+                </p>
+            {% endif %}
+            <input type="password" id="api_key" name="api_key" placeholder="Paste a new key to replace the stored one">
+            {% if config.api_key %}
+                <label style="display: flex; align-items: center; gap: .5rem; margin-top: .5rem; font-weight: normal;">
+                    <input type="checkbox" name="clear_api_key" value="1" style="width: auto;">
+                    <span class="text-muted">Remove the stored key</span>
+                </label>
+            {% endif %}
+        </div>
+
+        <div class="form-group">
+            <label for="base_url">Base URL (Optional)</label>
+            <input type="text" id="base_url" name="base_url" value="{{ config.base_url }}"
+                   placeholder="Leave blank for the provider default">
+        </div>
+
+        <div style="display: flex; justify-content: flex-end; gap: 1rem; margin-top: 2rem;">
+            <a href="{% url 'dashboard' %}" class="btn btn-outline">Cancel</a>
+            <button type="submit" name="action" value="test" class="btn btn-outline">Save &amp; Test Connection</button>
+            <button type="submit" class="btn btn-primary">Save</button>
+        </div>
+    </form>
+</div>
+
+{{ config.provider|json_script:"currentProvider" }}
+{{ config.model|json_script:"currentModel" }}
+
+<script>
+    (function () {
+        const PROVIDERS_WITH_CATALOG = ['openrouter'];
+        const PROVIDERS_NEEDING_KEY = ['openrouter', 'deepseek'];
+
+        const providerSelect = document.getElementById('provider');
+        const modelSelect = document.getElementById('model-select');
+        const modelInput = document.getElementById('model-input');
+        const apiKeyGroup = document.getElementById('api-key-group');
+        const modelHelp = document.getElementById('model-help');
+        const savedModel = JSON.parse(document.getElementById('currentModel').textContent);
+
+        let catalogLoaded = false;
+
+        function loadCatalog() {
+            if (catalogLoaded) return;
+            catalogLoaded = true;
+
+            fetch("{% url 'openrouter_models' %}")
+                .then(function (r) { return r.json(); })
+                .then(function (data) {
+                    modelSelect.innerHTML = '';
+                    if (!data.models || !data.models.length) {
+                        catalogLoaded = false;
+                        modelSelect.innerHTML = '<option value="">Could not load models — type one below</option>';
+                        modelHelp.textContent = data.error ? ('Model list unavailable: ' + data.error) : 'Model list unavailable.';
+                        return;
+                    }
+                    data.models.forEach(function (m) {
+                        const opt = document.createElement('option');
+                        opt.value = m.id;
+                        opt.textContent = m.name + ' (' + m.id + ')';
+                        if (m.id === savedModel) opt.selected = true;
+                        modelSelect.appendChild(opt);
+                    });
+                    modelHelp.textContent = data.models.length + ' models available via OpenRouter.';
+                })
+                .catch(function () {
+                    catalogLoaded = false;
+                    modelSelect.innerHTML = '<option value="">Could not load models</option>';
+                });
+        }
+
+        function sync() {
+            const provider = providerSelect.value;
+            const usesCatalog = PROVIDERS_WITH_CATALOG.indexOf(provider) !== -1;
+
+            // Only one of the two inputs is ever enabled, so only one `model` is posted.
+            modelSelect.style.display = usesCatalog ? '' : 'none';
+            modelSelect.disabled = !usesCatalog;
+            modelInput.style.display = usesCatalog ? 'none' : '';
+            modelInput.disabled = usesCatalog;
+
+            apiKeyGroup.style.display = PROVIDERS_NEEDING_KEY.indexOf(provider) !== -1 ? '' : 'none';
+
+            document.querySelectorAll('.provider-help').forEach(function (el) {
+                el.style.display = el.dataset.provider === provider ? '' : 'none';
+            });
+
+            if (usesCatalog) loadCatalog();
+        }
+
+        providerSelect.addEventListener('change', sync);
+        sync();
+    })();
+</script>
+{% endblock %}

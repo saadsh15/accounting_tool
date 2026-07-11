@@ -83,13 +83,15 @@ def _categorize_by_rules(description, rules):
     return None
 
 
-def _save_regex_transactions(statement, regex_parsed, rules, use_ai_categorization=True):
+def _save_regex_transactions(statement, regex_parsed, rules, use_ai_categorization=True, organization=None):
     """Persists regex-parsed rows and returns the number created."""
     created = 0
     for tx in regex_parsed:
         category = _categorize_by_rules(tx['description'], rules)
         if category is None and use_ai_categorization:
-            category = categorize_transaction_with_ai(tx['description'], float(tx['amount']))
+            category = categorize_transaction_with_ai(
+                tx['description'], float(tx['amount']), organization=organization
+            )
 
         Transaction.objects.create(
             statement=statement,
@@ -103,14 +105,13 @@ def _save_regex_transactions(statement, regex_parsed, rules, use_ai_categorizati
     return created
 
 
-def extract_transactions_with_ai(text):
+def extract_transactions_with_ai(text, organization=None):
     """
-    Asks the configured AI model to extract transactions from raw text.
+    Asks the organization's configured AI model to extract transactions from raw text.
     Returns a list of dicts: [{'date_str': 'YYYY-MM-DD', 'description': '...', 'amount': Decimal, 'category': '...'}]
     """
-    from .ai_service import ACCOUNTING_CATEGORIES, CATEGORIZATION_RULES, _call_deepseek, _call_ollama
-    
-    ai_provider = getattr(settings, 'AI_PROVIDER', 'ollama').lower()
+    from .ai_service import ACCOUNTING_CATEGORIES, CATEGORIZATION_RULES, call_llm
+
     categories_str = ", ".join(ACCOUNTING_CATEGORIES)
     
     system_message = """You are an expert financial data extraction system that reads bank statement text and extracts structured transaction data.
@@ -145,11 +146,10 @@ Here is the raw bank statement text:
 {text}
 """
     try:
-        if ai_provider == 'deepseek':
-            response_text = _call_deepseek(prompt, temperature=0.0, system_message=system_message)
-        else:
-            response_text = _call_ollama(prompt, temperature=0.0)
-            
+        response_text = call_llm(
+            prompt, organization=organization, temperature=0.0, system_message=system_message
+        )
+
         # Parse JSON
         cleaned = response_text.strip()
         if cleaned.startswith("```"):
@@ -239,7 +239,8 @@ def process_statement(statement):
     # 2. Dummy Statement format: MM/DD Description Amount Balance (e.g., 10/02 POS PURCHASE 4.23 65.73)
     pattern_dummy = re.compile(r'^(\d{2}/\d{2})\s+(.+?)\s+([+-]?\$?[\d,]+\.\d{2}|\.\d{2})\s+([+-]?\$?[\d,]+\.\d{2})$')
     
-    rules = CategoryRule.objects.filter(organization=statement.account.organization)
+    organization = statement.account.organization
+    rules = CategoryRule.objects.filter(organization=organization)
     
     transactions_created = 0
 
@@ -318,12 +319,14 @@ def process_statement(statement):
     
     # Phase 3: If descriptions are specific enough, save with individual AI categorization
     if regex_parsed and not use_ai_extraction:
-        transactions_created += _save_regex_transactions(statement, regex_parsed, rules)
+        transactions_created += _save_regex_transactions(
+            statement, regex_parsed, rules, organization=organization
+        )
 
     # AI Fallback Extraction if regex failed or descriptions were too vague
     if transactions_created == 0 and text.strip():
         print("Using AI full-text extraction for better categorization...")
-        ai_txs = extract_transactions_with_ai(text)
+        ai_txs = extract_transactions_with_ai(text, organization=organization)
         for tx in ai_txs:
             try:
                 date_obj = datetime.strptime(tx['date_str'], '%Y-%m-%d').date()
@@ -352,7 +355,7 @@ def process_statement(statement):
         print(f"AI extraction yielded no transactions. Falling back to {len(regex_parsed)} "
               f"regex-parsed rows without AI categorization.")
         transactions_created += _save_regex_transactions(
-            statement, regex_parsed, rules, use_ai_categorization=False
+            statement, regex_parsed, rules, use_ai_categorization=False, organization=organization
         )
 
     return transactions_created

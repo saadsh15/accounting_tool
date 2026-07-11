@@ -104,7 +104,7 @@ def ai_insights(request):
         ]
         
         if tx_data:
-            insights = generate_financial_insights(tx_data)
+            insights = generate_financial_insights(tx_data, organization=request.user.organization)
         else:
             insights = "Upload a bank statement first so the AI has data to analyze."
             
