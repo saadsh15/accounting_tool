@@ -66,6 +66,43 @@ def _is_vague_description(description):
     return cleaned in VAGUE_DESCRIPTIONS or any(cleaned == v for v in VAGUE_DESCRIPTIONS)
 
 
+def _normalize_category(category):
+    """Snaps a category onto the canonical list, defaulting to Miscellaneous."""
+    from .ai_service import ACCOUNTING_CATEGORIES
+    for std_cat in ACCOUNTING_CATEGORIES:
+        if std_cat.lower() == category.lower():
+            return std_cat
+    return "Miscellaneous"
+
+
+def _categorize_by_rules(description, rules):
+    """Returns the org's rule-based category for a description, or None if no rule matched."""
+    for rule in rules:
+        if rule.keyword.lower() in description.lower():
+            return rule.category_name
+    return None
+
+
+def _save_regex_transactions(statement, regex_parsed, rules, use_ai_categorization=True):
+    """Persists regex-parsed rows and returns the number created."""
+    created = 0
+    for tx in regex_parsed:
+        category = _categorize_by_rules(tx['description'], rules)
+        if category is None and use_ai_categorization:
+            category = categorize_transaction_with_ai(tx['description'], float(tx['amount']))
+
+        Transaction.objects.create(
+            statement=statement,
+            account=statement.account,
+            date=tx['date_obj'],
+            description=tx['description'],
+            amount=tx['amount'],
+            category=_normalize_category(category or "Miscellaneous")
+        )
+        created += 1
+    return created
+
+
 def extract_transactions_with_ai(text):
     """
     Asks the configured AI model to extract transactions from raw text.
@@ -281,37 +318,8 @@ def process_statement(statement):
     
     # Phase 3: If descriptions are specific enough, save with individual AI categorization
     if regex_parsed and not use_ai_extraction:
-        from .ai_service import ACCOUNTING_CATEGORIES
-        for tx in regex_parsed:
-            # Auto-categorize (Rule-based engine)
-            category = "Miscellaneous"
-            for rule in rules:
-                if rule.keyword.lower() in tx['description'].lower():
-                    category = rule.category_name
-                    break
-            
-            # AI Fallback: If no rule matched, let AI categorize it
-            if category == "Miscellaneous":
-                category = categorize_transaction_with_ai(tx['description'], float(tx['amount']))
-                
-            # Final validation: Ensure it is a standard category
-            matched_cat = None
-            for std_cat in ACCOUNTING_CATEGORIES:
-                if std_cat.lower() == category.lower():
-                    matched_cat = std_cat
-                    break
-            category = matched_cat if matched_cat else "Miscellaneous"
-                    
-            Transaction.objects.create(
-                statement=statement,
-                account=statement.account,
-                date=tx['date_obj'],
-                description=tx['description'],
-                amount=tx['amount'],
-                category=category
-            )
-            transactions_created += 1
-    
+        transactions_created += _save_regex_transactions(statement, regex_parsed, rules)
+
     # AI Fallback Extraction if regex failed or descriptions were too vague
     if transactions_created == 0 and text.strip():
         print("Using AI full-text extraction for better categorization...")
@@ -319,37 +327,34 @@ def process_statement(statement):
         for tx in ai_txs:
             try:
                 date_obj = datetime.strptime(tx['date_str'], '%Y-%m-%d').date()
-                amount = tx['amount']
-                description = tx['description']
-                category = tx['category']
-                
+                description = tx['description'].strip()
+
                 # Rule-based categorization has higher priority than AI prediction
-                for rule in rules:
-                    if rule.keyword.lower() in description.lower():
-                        category = rule.category_name
-                        break
-                        
-                # Final validation: Ensure it is a standard category
-                from .ai_service import ACCOUNTING_CATEGORIES
-                matched_cat = None
-                for std_cat in ACCOUNTING_CATEGORIES:
-                    if std_cat.lower() == category.lower():
-                        matched_cat = std_cat
-                        break
-                category = matched_cat if matched_cat else "Miscellaneous"
-                
+                category = _categorize_by_rules(description, rules) or tx['category']
+
                 Transaction.objects.create(
                     statement=statement,
                     account=statement.account,
                     date=date_obj,
-                    description=description.strip(),
-                    amount=amount,
-                    category=category
+                    description=description,
+                    amount=tx['amount'],
+                    category=_normalize_category(category)
                 )
                 transactions_created += 1
             except Exception as e:
                 print(f"Failed to save AI-extracted transaction: {e}")
-                
+
+    # Last resort: AI extraction produced nothing (unreachable provider, bad key,
+    # unparseable response), so fall back to the rows the regex already parsed
+    # rather than discarding them. Their descriptions are vague, not invalid.
+    # Per-transaction AI categorization is skipped here — the AI path just failed.
+    if transactions_created == 0 and regex_parsed:
+        print(f"AI extraction yielded no transactions. Falling back to {len(regex_parsed)} "
+              f"regex-parsed rows without AI categorization.")
+        transactions_created += _save_regex_transactions(
+            statement, regex_parsed, rules, use_ai_categorization=False
+        )
+
     statement.processed = True
     statement.save()
     
