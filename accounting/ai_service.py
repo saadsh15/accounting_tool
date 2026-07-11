@@ -256,6 +256,82 @@ Output ONLY the category name, nothing else:"""
         return "Miscellaneous"
 
 
+def _sanitize(description):
+    return re.sub(r'[^\w\s-]', '', description)[:200]
+
+
+def categorize_transactions_with_ai(items, organization=None):
+    """Categorizes many transactions in ONE call.
+
+    `items` is a list of (description, amount). Returns a list of categories in the
+    same order and of the same length.
+
+    Doing this per transaction meant N sequential round-trips per statement, which
+    no serverless function budget survives. One call also gives the model the whole
+    statement as context, which it never had before.
+    """
+    if not items:
+        return []
+
+    config = resolve_ai_config(organization)
+
+    system_message = """You are an expert, meticulous accountant who categorizes bank transactions with extreme precision.
+You MUST output ONLY a valid JSON object mapping each transaction's index to its category.
+You MUST pick from the provided category list. Never invent new categories."""
+
+    lines = []
+    for i, (description, amount) in enumerate(items):
+        flow = "CREDIT/DEPOSIT (money IN)" if amount >= 0 else "DEBIT/WITHDRAWAL (money OUT)"
+        lines.append(f'{i}: "{_sanitize(description)}" | amount {amount} ({flow})')
+    listing = "\n".join(lines)
+
+    prompt = f"""Categorize EVERY transaction below into EXACTLY ONE category.
+
+Categories: {', '.join(ACCOUNTING_CATEGORIES)}
+
+{CATEGORIZATION_RULES}
+
+Transactions (index: "description" | amount):
+{listing}
+
+Return ONLY a JSON object mapping every index above to its category, e.g.
+{{"0": "Groceries", "1": "Income"}}"""
+
+    try:
+        raw = call_llm(prompt, config=config, temperature=0.0, system_message=system_message)
+
+        cleaned = raw.strip()
+        if cleaned.startswith("```"):
+            newline = cleaned.find("\n")
+            if newline != -1:
+                cleaned = cleaned[newline:].strip()
+            if cleaned.endswith("```"):
+                cleaned = cleaned[:-3].strip()
+
+        mapping = json.loads(cleaned)
+    except Exception as e:
+        print(f"AI batch categorization failed ({config.provider}): {e}")
+        return ["Miscellaneous"] * len(items)
+
+    # The model may skip or hallucinate indices; fall back per item rather than
+    # letting one bad entry lose the whole statement's categories.
+    results = []
+    for i in range(len(items)):
+        value = mapping.get(str(i)) or mapping.get(i) or ""
+        results.append(_coerce_category(str(value)))
+    return results
+
+
+def _coerce_category(value):
+    value = value.strip()
+    if value in ACCOUNTING_CATEGORIES:
+        return value
+    for valid in ACCOUNTING_CATEGORIES:
+        if valid.lower() in value.lower():
+            return valid
+    return "Miscellaneous"
+
+
 def generate_financial_insights(transactions_data, organization=None):
     """
     Takes a list of transaction dictionaries and generates a financial summary/insights.

@@ -1,4 +1,5 @@
 from django.shortcuts import render, redirect, get_object_or_404
+from django.urls import reverse
 import os
 from django.contrib.auth.decorators import login_required
 from django.views.decorators.cache import never_cache
@@ -6,10 +7,17 @@ from .models import Account, AISettings, Statement, Transaction
 from core.models import Organization
 from .providers import PROVIDERS
 from .ai_service import check_connection, fetch_openrouter_models, resolve_ai_config
-from .tasks import process_statement_task
+from .queue import enqueue_statement, is_configured as queue_is_configured, verify_signature
+from .tasks import process_statement_job
 from django.contrib import messages
 from django.conf import settings
-from django.http import JsonResponse
+from django.http import HttpResponse, HttpResponseForbidden, JsonResponse
+from django.views.decorators.csrf import csrf_exempt
+from django.views.decorators.http import require_POST
+import json
+import logging
+
+logger = logging.getLogger(__name__)
 
 @login_required
 @never_cache
@@ -41,17 +49,28 @@ def upload_statement(request):
             
             statement = Statement.objects.create(account=account, file=file)
 
-            # Hand off to a worker: OCR + LLM calls can outlast the request timeout.
+            # Hand the work off: OCR + LLM calls outlast the serverless function budget.
+            # With no queue configured this runs inline instead.
             try:
-                process_statement_task.delay(statement.id)
-                messages.info(request, 'Statement uploaded. Extracting transactions in the background — this page will update when it finishes.')
+                queued = enqueue_statement(statement.id)
+                if queued:
+                    messages.info(request, 'Statement uploaded. Extracting transactions in the background — this page will update when it finishes.')
+                else:
+                    statement.refresh_from_db()
+                    if statement.status == Statement.Status.DONE and statement.transactions_found:
+                        messages.success(request, f'Statement processed. {statement.transactions_found} transactions found.')
+                    elif statement.status == Statement.Status.DONE:
+                        messages.warning(request, 'Statement processed, but no transactions could be extracted. Ensure the file contains clear, tabular transaction data.')
+                    else:
+                        messages.error(request, f'Could not process statement: {statement.error_message}')
             except Exception as e:
-                # Broker unreachable. Leave the statement PENDING so it can be retried
-                # rather than silently stranding an upload nobody will ever process.
+                # Queue unreachable. Mark it failed rather than silently stranding an
+                # upload that nobody will ever process.
+                logger.exception("Could not queue statement %s", statement.id)
                 statement.status = Statement.Status.FAILED
                 statement.error_message = f'Could not queue for processing: {e}'
                 statement.save(update_fields=['status', 'error_message'])
-                messages.error(request, 'Statement uploaded but could not be queued for processing. Please contact support.')
+                messages.error(request, 'Statement uploaded but could not be queued for processing. Please try again.')
 
             return redirect('dashboard')
         else:
@@ -91,6 +110,41 @@ def add_account(request):
             messages.error(request, 'Account name is required.')
             
     return render(request, 'accounting/add_account.html')
+
+@csrf_exempt
+@require_POST
+def process_statement_webhook(request):
+    """Endpoint QStash calls back to run the extraction.
+
+    Public and session-less by necessity — QStash has no cookies — so the JWT
+    signature is the ONLY thing preventing a stranger from driving this endpoint
+    against arbitrary statement IDs. Never process an unverified request.
+    """
+    signature = request.headers.get('Upstash-Signature', '')
+    if not signature:
+        return HttpResponseForbidden('Missing signature.')
+
+    url = f"{settings.SITE_URL.rstrip('/')}{reverse('process_statement_webhook')}"
+    try:
+        valid = verify_signature(signature, request.body, url)
+    except ValueError as exc:
+        logger.error("Webhook rejected: %s", exc)
+        return HttpResponseForbidden('Signing keys not configured.')
+
+    if not valid:
+        logger.warning("Webhook rejected: invalid signature.")
+        return HttpResponseForbidden('Invalid signature.')
+
+    try:
+        statement_id = json.loads(request.body)['statement_id']
+    except (ValueError, KeyError):
+        return HttpResponse('Bad payload.', status=400)
+
+    # A raised exception returns 500, which is QStash's cue to retry. The job marks
+    # the statement failed before re-raising, so a permanent failure is still visible.
+    count = process_statement_job(statement_id)
+    return JsonResponse({'statement_id': statement_id, 'transactions': count})
+
 
 @login_required
 @never_cache

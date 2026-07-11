@@ -8,5 +8,9 @@ python-dotenv>=1.0.1
 django-environ>=0.11.2
 requests>=2.31.0
 whitenoise>=6.6.0
-celery>=5.3.6
-redis>=5.0.1
+# Durable uploads. Vercel's /tmp is per-invocation, so the statement file must
+# live in object storage for the background job to be able to read it back.
+django-storages>=1.14.2
+boto3>=1.34.0
+# Verifies the QStash webhook signature.
+PyJWT>=2.8.0

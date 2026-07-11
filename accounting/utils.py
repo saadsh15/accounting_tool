@@ -1,5 +1,6 @@
 import pdfplumber
 import pytesseract
+from io import BytesIO
 from PIL import Image
 import re
 import requests
@@ -8,33 +9,32 @@ from datetime import datetime
 from django.conf import settings
 from .models import Transaction, CategoryRule
 from decimal import Decimal, InvalidOperation
-from .ai_service import categorize_transaction_with_ai
 
-def ocr_via_ocr_space(file_path):
+def ocr_via_ocr_space(data, filename):
     """
     Calls OCR.space API as a fallback when Tesseract is not available.
-    Supports PDF and image files.
+    Takes the file's bytes, since the statement may live in object storage rather
+    than on disk. Supports PDF and image files.
     """
     try:
         api_key = getattr(settings, 'OCR_SPACE_API_KEY', 'helloworld')
         if not api_key:
             api_key = 'helloworld'
-            
+
         payload = {
             'apikey': api_key,
             'language': 'eng',
             'isTable': True, # Forces row-by-row parsing for tabular data
             'OCREngine': 2,   # Engine 2 is much better for table layouts
         }
-        
-        with open(file_path, 'rb') as f:
-            r = requests.post(
-                'https://api.ocr.space/parse/image',
-                files={'file': f},
-                data=payload,
-                timeout=30
-            )
-        
+
+        r = requests.post(
+            'https://api.ocr.space/parse/image',
+            files={'file': (filename, BytesIO(data))},
+            data=payload,
+            timeout=30
+        )
+
         res = r.json()
         if res.get('IsErroredOnProcessing') is False:
             parsed_results = res.get('ParsedResults', [])
@@ -85,24 +85,33 @@ def _categorize_by_rules(description, rules):
 
 def _save_regex_transactions(statement, regex_parsed, rules, use_ai_categorization=True, organization=None):
     """Persists regex-parsed rows and returns the number created."""
-    created = 0
-    for tx in regex_parsed:
-        category = _categorize_by_rules(tx['description'], rules)
-        if category is None and use_ai_categorization:
-            category = categorize_transaction_with_ai(
-                tx['description'], float(tx['amount']), organization=organization
-            )
+    from .ai_service import categorize_transactions_with_ai
 
-        Transaction.objects.create(
+    # Local rules first — they're free and outrank the model.
+    categories = [_categorize_by_rules(tx['description'], rules) for tx in regex_parsed]
+
+    # Everything the rules missed goes to the model in a SINGLE call, not one each.
+    unmatched = [i for i, cat in enumerate(categories) if cat is None]
+    if unmatched and use_ai_categorization:
+        predicted = categorize_transactions_with_ai(
+            [(regex_parsed[i]['description'], float(regex_parsed[i]['amount'])) for i in unmatched],
+            organization=organization,
+        )
+        for i, category in zip(unmatched, predicted):
+            categories[i] = category
+
+    Transaction.objects.bulk_create([
+        Transaction(
             statement=statement,
             account=statement.account,
             date=tx['date_obj'],
             description=tx['description'],
             amount=tx['amount'],
-            category=_normalize_category(category or "Miscellaneous")
+            category=_normalize_category(categories[i] or "Miscellaneous"),
         )
-        created += 1
-    return created
+        for i, tx in enumerate(regex_parsed)
+    ])
+    return len(regex_parsed)
 
 
 def extract_transactions_with_ai(text, organization=None):
@@ -195,13 +204,20 @@ Here is the raw bank statement text:
         print(f"Failed to extract transactions with AI: {e}")
         return []
 
-def process_statement(statement):
-    file_path = statement.file.path
+def extract_text(statement):
+    """Pulls text out of the uploaded statement.
+
+    Works on bytes, never a filesystem path: in production the file lives in object
+    storage, where `statement.file.path` does not exist at all.
+    """
+    name = statement.file.name
+    with statement.file.open('rb') as fh:
+        data = fh.read()
+
     text = ""
-    
-    # Extract text from PDF using pdfplumber or OCR for images
-    if file_path.lower().endswith('.pdf'):
-        with pdfplumber.open(file_path) as pdf:
+
+    if name.lower().endswith('.pdf'):
+        with pdfplumber.open(BytesIO(data)) as pdf:
             for page in pdf.pages:
                 extracted = page.extract_text()
                 if extracted and extracted.strip():
@@ -215,21 +231,31 @@ def process_statement(statement):
                             text += ocr_text + "\n"
                     except Exception as e:
                         print(f"Skipped OCR on PDF page due to missing Tesseract: {e}")
-                        
+
         # Fallback to OCR.space if no text was extracted
         if not text.strip():
             print("No text extracted via pdfplumber or local Tesseract. Falling back to OCR.space API...")
-            text = ocr_via_ocr_space(file_path)
-                        
-    elif file_path.lower().endswith(('.png', '.jpg', '.jpeg')):
-        try:
-            text = pytesseract.image_to_string(Image.open(file_path))
-        except Exception as e:
-            print(f"Local OCR failed or missing: {e}. Falling back to OCR.space API...")
-            text = ocr_via_ocr_space(file_path)
-            if not text:
-                raise Exception("Could not read text from this image. Local OCR (Tesseract) is unavailable and the OCR.space fallback returned nothing. Install tesseract-ocr on the server, or upload a text-based PDF instead.")
+            text = ocr_via_ocr_space(data, name)
 
+    elif name.lower().endswith(('.png', '.jpg', '.jpeg')):
+        try:
+            text = pytesseract.image_to_string(Image.open(BytesIO(data)))
+        except Exception as e:
+            # Tesseract is a binary, and Vercel's runtime has no way to install one,
+            # so on Vercel this path is always the OCR.space API.
+            print(f"Local OCR unavailable: {e}. Falling back to OCR.space API...")
+            text = ocr_via_ocr_space(data, name)
+            if not text:
+                raise Exception(
+                    "Could not read text from this image. Local OCR (Tesseract) is unavailable "
+                    "and the OCR.space fallback returned nothing. Upload a text-based PDF instead."
+                )
+
+    return text
+
+
+def process_statement(statement):
+    text = extract_text(statement)
     lines = text.split('\n')
     
     # Broadened regex patterns — use \d+ to handle any number of digits
@@ -245,7 +271,7 @@ def process_statement(statement):
     transactions_created = 0
 
     # For logging/debugging in the console
-    print(f"--- Extracted Text from {file_path} ---")
+    print(f"--- Extracted Text from {statement.file.name} ---")
     print(text[:500] + ("..." if len(text) > 500 else ""))
     print("---------------------------------------")
 
