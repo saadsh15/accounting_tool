@@ -228,7 +228,7 @@ def process_statement(statement):
             print(f"Local OCR failed or missing: {e}. Falling back to OCR.space API...")
             text = ocr_via_ocr_space(file_path)
             if not text:
-                raise Exception("Image uploads require Tesseract OCR, which is not installed in the Vercel serverless environment. Please upload a standard text-based PDF instead.")
+                raise Exception("Could not read text from this image. Local OCR (Tesseract) is unavailable and the OCR.space fallback returned nothing. Install tesseract-ocr on the server, or upload a text-based PDF instead.")
 
     lines = text.split('\n')
     
@@ -355,8 +355,5 @@ def process_statement(statement):
             statement, regex_parsed, rules, use_ai_categorization=False
         )
 
-    statement.processed = True
-    statement.save()
-    
     return transactions_created
 

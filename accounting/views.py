@@ -4,9 +4,10 @@ from django.contrib.auth.decorators import login_required
 from django.views.decorators.cache import never_cache
 from .models import Account, Statement, Transaction
 from core.models import Organization
-from .utils import process_statement
+from .tasks import process_statement_task
 from django.contrib import messages
 from django.conf import settings
+from django.http import JsonResponse
 
 @login_required
 @never_cache
@@ -37,17 +38,19 @@ def upload_statement(request):
             account = get_object_or_404(Account, id=account_id, organization=request.user.organization)
             
             statement = Statement.objects.create(account=account, file=file)
-            
-            # Simple synchronous processing for MVP
+
+            # Hand off to a worker: OCR + LLM calls can outlast the request timeout.
             try:
-                tx_count = process_statement(statement)
-                if tx_count > 0:
-                    messages.success(request, f'Statement processed successfully! {tx_count} transactions found.')
-                else:
-                    messages.warning(request, 'Statement was processed, but no transactions could be automatically extracted. Ensure the file contains clear, tabular transaction data.')
+                process_statement_task.delay(statement.id)
+                messages.info(request, 'Statement uploaded. Extracting transactions in the background — this page will update when it finishes.')
             except Exception as e:
-                messages.error(request, f'Error processing statement: {str(e)}')
-            
+                # Broker unreachable. Leave the statement PENDING so it can be retried
+                # rather than silently stranding an upload nobody will ever process.
+                statement.status = Statement.Status.FAILED
+                statement.error_message = f'Could not queue for processing: {e}'
+                statement.save(update_fields=['status', 'error_message'])
+                messages.error(request, 'Statement uploaded but could not be queued for processing. Please contact support.')
+
             return redirect('dashboard')
         else:
             messages.error(request, 'Please select a valid account and provide a statement file.')
@@ -86,6 +89,20 @@ def add_account(request):
             messages.error(request, 'Account name is required.')
             
     return render(request, 'accounting/add_account.html')
+
+@login_required
+@never_cache
+def statement_status(request):
+    """Lets the dashboard poll for background processing without a manual refresh."""
+    if not request.user.organization:
+        return JsonResponse({'in_flight': 0})
+
+    in_flight = Statement.objects.filter(
+        account__organization=request.user.organization,
+        status__in=Statement.IN_FLIGHT,
+    ).count()
+    return JsonResponse({'in_flight': in_flight})
+
 
 @login_required
 @never_cache

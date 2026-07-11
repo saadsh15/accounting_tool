@@ -11,11 +11,21 @@ class Account(models.Model):
         return f"{self.name} ({self.bank_name})"
 
 class Statement(models.Model):
+    class Status(models.TextChoices):
+        PENDING = 'pending', 'Pending'
+        PROCESSING = 'processing', 'Processing'
+        DONE = 'done', 'Done'
+        FAILED = 'failed', 'Failed'
+
     account = models.ForeignKey(Account, on_delete=models.CASCADE, related_name='statements')
     file = models.FileField(upload_to='statements/')
     uploaded_at = models.DateTimeField(auto_now_add=True)
-    processed = models.BooleanField(default=False)
-    
+    status = models.CharField(max_length=20, choices=Status.choices, default=Status.PENDING)
+    transactions_found = models.PositiveIntegerField(default=0)
+    error_message = models.TextField(blank=True)
+
+    IN_FLIGHT = (Status.PENDING, Status.PROCESSING)
+
     def __str__(self):
         return f"Statement for {self.account.name} at {self.uploaded_at.strftime('%Y-%m-%d')}"
 

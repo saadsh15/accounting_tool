@@ -5,6 +5,7 @@ from core.models import User, Organization
 from accounting.models import Account, CategoryRule, Statement, Transaction
 from accounting.ai_service import categorize_transaction_with_ai
 from accounting.utils import process_statement
+from accounting.tasks import process_statement_task
 from decimal import Decimal
 from unittest.mock import MagicMock, patch
 import re
@@ -187,3 +188,140 @@ class VagueDescriptionEscalationTests(TestCase):
         tx = Transaction.objects.get()
         self.assertEqual(tx.description, "POS PURCHASE WAL-MART")
         self.assertEqual(tx.category, "Groceries")
+
+
+@override_settings(SECURE_SSL_REDIRECT=False, ALLOWED_HOSTS=['testserver'], AI_PROVIDER='ollama')
+class ProcessStatementTaskTests(TestCase):
+    """The task owns the statement lifecycle; process_statement() just extracts."""
+
+    def setUp(self):
+        self.org = Organization.objects.create(name="Org")
+        self.account = Account.objects.create(organization=self.org, name="Checking")
+        self.statement = Statement.objects.create(
+            account=self.account,
+            file=SimpleUploadedFile("statement.pdf", b"%PDF-1.4 fake", content_type="application/pdf"),
+        )
+
+    def test_new_statement_starts_pending(self):
+        self.assertEqual(self.statement.status, Statement.Status.PENDING)
+
+    @patch('accounting.tasks.process_statement', return_value=3)
+    def test_success_marks_done_and_records_count(self, _extract):
+        result = process_statement_task(self.statement.id)
+
+        self.statement.refresh_from_db()
+        self.assertEqual(result, 3)
+        self.assertEqual(self.statement.status, Statement.Status.DONE)
+        self.assertEqual(self.statement.transactions_found, 3)
+        self.assertEqual(self.statement.error_message, "")
+
+    @patch('accounting.tasks.process_statement', side_effect=Exception("tesseract exploded"))
+    def test_failure_marks_failed_and_records_reason(self, _extract):
+        with self.assertRaises(Exception):
+            process_statement_task(self.statement.id)
+
+        self.statement.refresh_from_db()
+        self.assertEqual(self.statement.status, Statement.Status.FAILED)
+        self.assertIn("tesseract exploded", self.statement.error_message)
+
+    def test_reprocessing_does_not_duplicate_transactions(self):
+        """Re-running a job that already created rows must replace, not append."""
+        def create_one(statement):
+            Transaction.objects.create(
+                statement=statement, account=statement.account,
+                date="2026-10-02", description="POS PURCHASE", amount=Decimal("-4.23"),
+                category="Miscellaneous",
+            )
+            return 1
+
+        with patch('accounting.tasks.process_statement', side_effect=create_one):
+            process_statement_task(self.statement.id)
+            process_statement_task(self.statement.id)
+
+        self.assertEqual(Transaction.objects.count(), 1)
+        self.statement.refresh_from_db()
+        self.assertEqual(self.statement.transactions_found, 1)
+
+    def test_deleted_statement_is_a_noop(self):
+        """The account can be deleted while the job sits in the queue."""
+        statement_id = self.statement.id
+        self.statement.delete()
+        self.assertEqual(process_statement_task(statement_id), 0)
+
+
+@override_settings(SECURE_SSL_REDIRECT=False, ALLOWED_HOSTS=['testserver'])
+class UploadEnqueueTests(TestCase):
+    """Upload must hand off to the worker, never process in the request cycle."""
+
+    def setUp(self):
+        self.client = Client()
+        self.org = Organization.objects.create(name="Org")
+        self.user = User.objects.create_user(username="u", password="p", organization=self.org)
+        self.account = Account.objects.create(organization=self.org, name="Checking")
+        self.client.login(username="u", password="p")
+
+    def _upload(self):
+        return self.client.post(reverse('upload_statement'), {
+            'account': self.account.id,
+            'statement_file': SimpleUploadedFile("s.pdf", b"%PDF-1.4", content_type="application/pdf"),
+        })
+
+    @patch('accounting.views.process_statement_task.delay')
+    def test_upload_enqueues_and_returns_immediately(self, delay):
+        response = self._upload()
+
+        self.assertRedirects(response, reverse('dashboard'), fetch_redirect_response=False)
+        statement = Statement.objects.get()
+        delay.assert_called_once_with(statement.id)
+        # Still PENDING: the worker, not the request, moves it forward.
+        self.assertEqual(statement.status, Statement.Status.PENDING)
+
+    @patch('accounting.views.process_statement_task.delay', side_effect=OSError("redis down"))
+    def test_unreachable_broker_marks_statement_failed(self, _delay):
+        """A queued-but-never-processed statement would be invisible; surface it instead."""
+        self._upload()
+
+        statement = Statement.objects.get()
+        self.assertEqual(statement.status, Statement.Status.FAILED)
+        self.assertIn("redis down", statement.error_message)
+
+
+@override_settings(SECURE_SSL_REDIRECT=False, ALLOWED_HOSTS=['testserver'])
+class StatementStatusEndpointTests(TestCase):
+    def setUp(self):
+        self.client = Client()
+        self.org = Organization.objects.create(name="Org 1")
+        self.user = User.objects.create_user(username="u1", password="p", organization=self.org)
+        self.account = Account.objects.create(organization=self.org, name="Checking")
+
+        self.other_org = Organization.objects.create(name="Org 2")
+        self.other_account = Account.objects.create(organization=self.other_org, name="Theirs")
+
+        self.client.login(username="u1", password="p")
+
+    def _make(self, account, status):
+        return Statement.objects.create(
+            account=account,
+            file=SimpleUploadedFile("s.pdf", b"%PDF", content_type="application/pdf"),
+            status=status,
+        )
+
+    def test_counts_only_in_flight_statements(self):
+        self._make(self.account, Statement.Status.PENDING)
+        self._make(self.account, Statement.Status.PROCESSING)
+        self._make(self.account, Statement.Status.DONE)
+        self._make(self.account, Statement.Status.FAILED)
+
+        response = self.client.get(reverse('statement_status'))
+        self.assertEqual(response.json(), {'in_flight': 2})
+
+    def test_does_not_leak_other_organizations(self):
+        self._make(self.other_account, Statement.Status.PROCESSING)
+
+        response = self.client.get(reverse('statement_status'))
+        self.assertEqual(response.json(), {'in_flight': 0})
+
+    def test_requires_login(self):
+        self.client.logout()
+        response = self.client.get(reverse('statement_status'))
+        self.assertEqual(response.status_code, 302)

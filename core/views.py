@@ -4,7 +4,7 @@ from django.views.decorators.cache import never_cache
 from django.contrib.auth import login
 from django.http import HttpResponse
 import csv
-from accounting.models import Transaction
+from accounting.models import Statement, Transaction
 from .forms import CustomUserCreationForm
 from accounting.ai_service import generate_financial_insights
 from django.db.models import Sum
@@ -32,7 +32,14 @@ def dashboard(request):
     
     category_data = {cat: Decimal('0.00') for cat in EXPENSE_CATEGORIES}
     
+    statements_in_flight = 0
+    failed_statements = []
+
     if request.user.organization:
+        org_statements = Statement.objects.filter(account__organization=request.user.organization)
+        statements_in_flight = org_statements.filter(status__in=Statement.IN_FLIGHT).count()
+        failed_statements = org_statements.filter(status=Statement.Status.FAILED).order_by('-uploaded_at')[:5]
+
         org_txs = Transaction.objects.filter(account__organization=request.user.organization)
         transactions = org_txs.order_by('-date')[:10]
         
@@ -73,6 +80,8 @@ def dashboard(request):
         'net_balance': net_balance,
         'chart_labels': chart_labels,
         'chart_values': chart_values,
+        'statements_in_flight': statements_in_flight,
+        'failed_statements': failed_statements,
     }
     return render(request, 'core/dashboard.html', context)
 
