@@ -1,0 +1,13 @@
+# System packages. These are NOT pip-installable — install them with apt:
+#
+#   sudo apt-get install -y $(grep -vE '^\s*#|^\s*$' packages.txt)
+#
+# Their Python counterparts live in requirements.txt:
+#   tesseract-ocr -> pytesseract (binding only; the OCR engine is this binary)
+#   redis-server  -> redis       (client only; the broker is this daemon)
+
+# OCR engine, used for scanned PDFs and image statements.
+tesseract-ocr
+
+# Celery broker. Without it, uploaded statements queue and are never processed.
+redis-server

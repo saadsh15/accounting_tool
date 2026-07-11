@@ -7,10 +7,23 @@
     <h1>Dashboard</h1>
     <div style="display: flex; gap: 1rem;">
         <a href="{% url 'download_csv' %}" class="btn btn-outline">Export CSV</a>
+        <a href="{% url 'ai_settings' %}" class="btn btn-outline">AI Settings</a>
         <a href="{% url 'ai_insights' %}" class="btn btn-outline">AI Insights</a>
         <a href="{% url 'upload_statement' %}" class="btn btn-primary">Upload Statement</a>
     </div>
 </div>
+
+{% if statements_in_flight %}
+<div class="alert alert-info" id="processing-banner" style="margin-bottom: 1.5rem;">
+    Extracting transactions from {{ statements_in_flight }} statement{{ statements_in_flight|pluralize }}. This page refreshes automatically when it finishes.
+</div>
+{% endif %}
+
+{% for statement in failed_statements %}
+<div class="alert alert-error" style="margin-bottom: 1.5rem;">
+    Could not process <strong>{{ statement.file.name }}</strong>: {{ statement.error_message }}
+</div>
+{% endfor %}
 
 <div class="grid-3" style="margin-bottom: 3rem;">
     <div class="card">
@@ -235,4 +248,33 @@
         }
     });
 </script>
+
+{% if statements_in_flight %}
+<script>
+    // Statements are processed by a background worker. Poll until the queue drains,
+    // then reload so the new transactions and totals appear.
+    (function () {
+        const STATUS_URL = "{% url 'statement_status' %}";
+        let elapsed = 0;
+
+        const poll = setInterval(function () {
+            elapsed += 3;
+            // Give up after 10 minutes rather than polling a dead worker forever.
+            if (elapsed > 600) {
+                clearInterval(poll);
+                return;
+            }
+            fetch(STATUS_URL, { headers: { 'X-Requested-With': 'XMLHttpRequest' } })
+                .then(function (r) { return r.ok ? r.json() : null; })
+                .then(function (data) {
+                    if (data && data.in_flight === 0) {
+                        clearInterval(poll);
+                        window.location.reload();
+                    }
+                })
+                .catch(function () { /* transient failure; try again on the next tick */ });
+        }, 3000);
+    })();
+</script>
+{% endif %}
 {% endblock %}

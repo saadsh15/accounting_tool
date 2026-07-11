@@ -1,0 +1,51 @@
+name: CI
+
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+    branches: ["main"]
+
+jobs:
+  test:
+    name: Tests (Python ${{ matrix.python-version }})
+    runs-on: ubuntu-latest
+
+    strategy:
+      fail-fast: false
+      matrix:
+        # Django 5.0 supports 3.10-3.12 only. 3.12 is what we deploy on.
+        python-version: ["3.12"]
+
+    env:
+      # settings.py raises ImproperlyConfigured without this, before any test loads.
+      SECRET_KEY: ci-secret-key-not-used-in-production
+      DEBUG: "False"
+      # Redis is not needed: the task tests call the task directly and mock .delay.
+      CELERY_TASK_ALWAYS_EAGER: "True"
+
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: pip
+          cache-dependency-path: requirements.txt
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Django system checks
+        run: python manage.py check
+
+      - name: Fail if a model change has no migration
+        run: python manage.py makemigrations --check --dry-run
+
+      - name: Verify migrations apply from scratch
+        run: python manage.py migrate --noinput
+
+      - name: Run tests
+        run: python manage.py test --verbosity=2

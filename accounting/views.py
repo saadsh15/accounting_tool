@@ -2,11 +2,14 @@ from django.shortcuts import render, redirect, get_object_or_404
 import os
 from django.contrib.auth.decorators import login_required
 from django.views.decorators.cache import never_cache
-from .models import Account, Statement, Transaction
+from .models import Account, AISettings, Statement, Transaction
 from core.models import Organization
-from .utils import process_statement
+from .providers import PROVIDERS
+from .ai_service import check_connection, fetch_openrouter_models, resolve_ai_config
+from .tasks import process_statement_task
 from django.contrib import messages
 from django.conf import settings
+from django.http import JsonResponse
 
 @login_required
 @never_cache
@@ -37,17 +40,19 @@ def upload_statement(request):
             account = get_object_or_404(Account, id=account_id, organization=request.user.organization)
             
             statement = Statement.objects.create(account=account, file=file)
-            
-            # Simple synchronous processing for MVP
+
+            # Hand off to a worker: OCR + LLM calls can outlast the request timeout.
             try:
-                tx_count = process_statement(statement)
-                if tx_count > 0:
-                    messages.success(request, f'Statement processed successfully! {tx_count} transactions found.')
-                else:
-                    messages.warning(request, 'Statement was processed, but no transactions could be automatically extracted. Ensure the file contains clear, tabular transaction data.')
+                process_statement_task.delay(statement.id)
+                messages.info(request, 'Statement uploaded. Extracting transactions in the background — this page will update when it finishes.')
             except Exception as e:
-                messages.error(request, f'Error processing statement: {str(e)}')
-            
+                # Broker unreachable. Leave the statement PENDING so it can be retried
+                # rather than silently stranding an upload nobody will ever process.
+                statement.status = Statement.Status.FAILED
+                statement.error_message = f'Could not queue for processing: {e}'
+                statement.save(update_fields=['status', 'error_message'])
+                messages.error(request, 'Statement uploaded but could not be queued for processing. Please contact support.')
+
             return redirect('dashboard')
         else:
             messages.error(request, 'Please select a valid account and provide a statement file.')
@@ -86,6 +91,78 @@ def add_account(request):
             messages.error(request, 'Account name is required.')
             
     return render(request, 'accounting/add_account.html')
+
+@login_required
+@never_cache
+def ai_settings(request):
+    """Per-organization LLM provider selection."""
+    if not request.user.organization:
+        org = Organization.objects.create(name=f"{request.user.username}'s Organization")
+        request.user.organization = org
+        request.user.save()
+
+    config, _ = AISettings.objects.get_or_create(organization=request.user.organization)
+
+    if request.method == 'POST':
+        provider = request.POST.get('provider', '')
+        if provider not in PROVIDERS:
+            messages.error(request, 'Unknown provider.')
+            return redirect('ai_settings')
+
+        config.provider = provider
+        config.model = request.POST.get('model', '').strip()
+        config.base_url = request.POST.get('base_url', '').strip()
+
+        # Blank means "leave the stored key alone", not "erase it" — the field is
+        # never populated with the real key, so a blank submit must not wipe it.
+        submitted_key = request.POST.get('api_key', '').strip()
+        if submitted_key:
+            config.api_key = submitted_key
+        elif request.POST.get('clear_api_key'):
+            config.api_key = ''
+
+        config.save()
+
+        if request.POST.get('action') == 'test':
+            ok, detail = check_connection(resolve_ai_config(request.user.organization))
+            if ok:
+                messages.success(request, f'Connection OK. {detail}')
+            else:
+                messages.error(request, f'Connection failed: {detail}')
+        else:
+            messages.success(request, 'AI settings saved.')
+
+        return redirect('ai_settings')
+
+    return render(request, 'accounting/ai_settings.html', {
+        'config': config,
+        'providers': PROVIDERS,
+    })
+
+
+@login_required
+@never_cache
+def openrouter_models(request):
+    """Live model catalog, so new frontier models appear without a deploy."""
+    try:
+        return JsonResponse({'models': fetch_openrouter_models()})
+    except Exception as exc:
+        return JsonResponse({'models': [], 'error': str(exc)[:200]}, status=502)
+
+
+@login_required
+@never_cache
+def statement_status(request):
+    """Lets the dashboard poll for background processing without a manual refresh."""
+    if not request.user.organization:
+        return JsonResponse({'in_flight': 0})
+
+    in_flight = Statement.objects.filter(
+        account__organization=request.user.organization,
+        status__in=Statement.IN_FLIGHT,
+    ).count()
+    return JsonResponse({'in_flight': in_flight})
+
 
 @login_required
 @never_cache
