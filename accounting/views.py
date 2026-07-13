@@ -243,6 +243,34 @@ def delete_transaction(request, transaction_id):
 
 @login_required
 @never_cache
+@require_POST
+def run_migrations(request):
+    """One-off: applies pending migrations against the production DB.
+
+    vercel.json's legacy `builds` array silently disables the dashboard Build
+    Command, so build_files.sh (and the `migrate` it runs) has never executed on
+    deploy. This is a stopgap until that's fixed properly; remove once deploys
+    apply migrations on their own.
+    """
+    password = request.POST.get('root_password')
+    root_pwd = getattr(settings, 'DELETE_ROOT_PASSWORD', 'root')
+    if password != root_pwd:
+        return HttpResponseForbidden('Incorrect root password.')
+
+    from io import StringIO
+    from django.core.management import call_command
+
+    out = StringIO()
+    try:
+        call_command('migrate', '--noinput', stdout=out, stderr=out)
+    except Exception as exc:
+        return JsonResponse({'ok': False, 'error': str(exc), 'output': out.getvalue()}, status=500)
+
+    return JsonResponse({'ok': True, 'output': out.getvalue()})
+
+
+@login_required
+@never_cache
 def delete_all_accounts(request):
     if request.method == 'POST':
         password = request.POST.get('root_password')
