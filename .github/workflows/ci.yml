@@ -21,8 +21,8 @@ jobs:
       # settings.py raises ImproperlyConfigured without this, before any test loads.
       SECRET_KEY: ci-secret-key-not-used-in-production
       DEBUG: "False"
-      # Redis is not needed: the task tests call the task directly and mock .delay.
-      CELERY_TASK_ALWAYS_EAGER: "True"
+      # No queue and no bucket configured, so jobs run inline and uploads use the
+      # local filesystem. The suite needs no external services.
 
     steps:
       - uses: actions/checkout@v5

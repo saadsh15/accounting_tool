@@ -1,18 +1,17 @@
-from celery import shared_task
-from celery.utils.log import get_task_logger
+import logging
 
 from .models import Statement
 from .utils import process_statement
 
-logger = get_task_logger(__name__)
+logger = logging.getLogger(__name__)
 
 
-@shared_task
-def process_statement_task(statement_id):
+def process_statement_job(statement_id):
     """Extracts transactions from an uploaded statement.
 
-    Runs on a worker rather than in the request cycle: OCR plus per-transaction
-    LLM calls can take minutes, far beyond the Gunicorn worker timeout.
+    Called from the QStash webhook (a separate serverless invocation), or inline
+    when no queue is configured. Plain function, no broker: the whole point of the
+    HTTP queue is that this runs in an ordinary request.
     """
     statement = Statement.objects.filter(pk=statement_id).first()
     if statement is None:
@@ -20,8 +19,8 @@ def process_statement_task(statement_id):
         logger.warning("Statement %s no longer exists; nothing to process.", statement_id)
         return 0
 
-    # Make re-processing idempotent. Without this, re-running a job that already
-    # created some transactions would duplicate them.
+    # Make re-processing idempotent. QStash retries on failure, and without this a
+    # retry of a job that already created some transactions would duplicate them.
     statement.transactions.all().delete()
 
     Statement.objects.filter(pk=statement_id).update(

@@ -10,6 +10,12 @@
     --success: #32D74B;
     --font-heading: 'Outfit', sans-serif;
     --font-body: 'Inter', sans-serif;
+
+    /* Corner radii. Kept tight so surfaces read sharp rather than rounded;
+       tune these three and the whole UI follows. */
+    --radius-lg: 6px;   /* cards, drop zone */
+    --radius-md: 4px;   /* buttons, inputs, alerts */
+    --radius-sm: 3px;   /* badges */
 }
 
 * {
@@ -102,8 +108,8 @@ h3 { font-size: 1.25rem; margin-bottom: 0.75rem; }
     display: inline-flex;
     align-items: center;
     justify-content: center;
-    padding: 0.6rem 1.2rem;
-    border-radius: 8px;
+    padding: 0.55rem 1.1rem;
+    border-radius: var(--radius-md);
     font-weight: 600;
     font-family: var(--font-body);
     font-size: 0.9rem;
@@ -145,8 +151,8 @@ h3 { font-size: 1.25rem; margin-bottom: 0.75rem; }
 .card {
     background-color: var(--bg-card);
     border: 1px solid var(--border);
-    border-radius: 16px;
-    padding: 1.5rem;
+    border-radius: var(--radius-lg);
+    padding: 1.15rem 1.25rem;
 }
 
 .grid-3 {
@@ -214,8 +220,8 @@ tr:hover td {
 }
 
 .badge {
-    padding: 0.25rem 0.75rem;
-    border-radius: 9999px;
+    padding: 0.25rem 0.6rem;
+    border-radius: var(--radius-sm);
     font-size: 0.75rem;
     font-weight: 600;
     background: rgba(255,255,255,0.1);
@@ -243,8 +249,8 @@ select {
     background-color: var(--bg);
     border: 1px solid var(--border);
     color: var(--text);
-    padding: 0.75rem 1rem;
-    border-radius: 8px;
+    padding: 0.65rem 0.85rem;
+    border-radius: var(--radius-md);
     font-family: var(--font-body);
     font-size: 1rem;
     transition: border-color 0.2s ease;
@@ -257,8 +263,8 @@ input:focus, select:focus {
 
 .drop-zone {
     border: 2px dashed var(--border);
-    border-radius: 16px;
-    padding: 4rem 2rem;
+    border-radius: var(--radius-lg);
+    padding: 3rem 2rem;
     text-align: center;
     background: var(--bg-card);
     transition: all 0.2s ease;
@@ -278,8 +284,8 @@ input:focus, select:focus {
 
 /* Messages */
 .alert {
-    padding: 1rem;
-    border-radius: 8px;
+    padding: 0.8rem 1rem;
+    border-radius: var(--radius-md);
     margin-bottom: 1.5rem;
     font-weight: 500;
 }
